@@ -107,7 +107,7 @@ if __name__ == '__main__':
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y,
         test_size=0.25, random_state=2001)
     # TODO: optimize implementation to support larger datasets
-    max_dataset_size = 100
+    max_dataset_size = 1000
     X_train, Y_train = X_train[:max_dataset_size], Y_train[:max_dataset_size]
 
     max_depth=999999

@@ -1,46 +1,47 @@
 import unittest
 import decision_tree
 import math
+from collections import Counter
 
 class EntropyImpurityTest(unittest.TestCase):
     def test_empy_set_has_0_impurity(self):
         self.assertAlmostEqual(
-            decision_tree.entropy_impurity([]), 0)
+            decision_tree.entropy_impurity(Counter()), 0)
 
     def test_uniform_distribution_has_high_impurity(self):
         self.assertAlmostEqual(
-            decision_tree.entropy_impurity([1,1,2,2]),
+            decision_tree.entropy_impurity(Counter([1,1,2,2])),
             -math.log(0.5))
 
     def test_unequal_distribution(self):
         self.assertAlmostEqual(
-            decision_tree.entropy_impurity([1,2,2, 3,3,3]),
+            decision_tree.entropy_impurity(Counter([1,2,2, 3,3,3])),
             -math.log(1/6)/6 - math.log(1/3)/3 - math.log(0.5)/2)
 
     def test_point_distribution_has_0_impurity(self):
         self.assertAlmostEqual(
-            decision_tree.entropy_impurity([1,1,1,1,1,1]),
+            decision_tree.entropy_impurity(Counter([1,1,1,1,1,1])),
             0)
 
 class GiniImpurityTest(unittest.TestCase):
     def test_empy_set_has_0_impurity(self):
         self.assertAlmostEqual(
-            decision_tree.gini_impurity([]),
+            decision_tree.gini_impurity(Counter()),
             0)
 
     def test_uniform_distribution_has_high_impurity(self):
         self.assertAlmostEqual(
-            decision_tree.gini_impurity([1,1,2,2]),
+            decision_tree.gini_impurity(Counter([1,1,2,2])),
             0.5)
 
     def test_unequal_distribution(self):
         self.assertAlmostEqual(
-            decision_tree.gini_impurity([1,2,2, 3,3,3]),
+            decision_tree.gini_impurity(Counter([1,2,2, 3,3,3])),
             1 - (1/6)**2 - (1/3)**2 - (1/2)**2)
 
     def test_point_distribution_has_0_impurity(self):
         self.assertAlmostEqual(
-            decision_tree.gini_impurity([1,1,1,1,1,1]),
+            decision_tree.gini_impurity(Counter([1,1,1,1,1,1])),
             0)
 
 class ThresholdPredicateTest(unittest.TestCase):
@@ -100,7 +101,10 @@ class ProposeSplitPartitionsTest(unittest.TestCase):
 
     def test_categorical_feature_has_equality_predicates(self):
         X = [['a'], ['b'], ['c']]
-        predicates = list(decision_tree.propose_split_predicates(X))
+        Y = [0, 0, 0]
+        impurity = decision_tree.gini_impurity
+        predicates = list(
+            decision_tree.propose_split_predicates(X, Y, impurity))
         self.assertCountEqual(predicates, [
             decision_tree.EqualityPredicate(0, 'a'),
             decision_tree.EqualityPredicate(0, 'b'),
@@ -109,7 +113,10 @@ class ProposeSplitPartitionsTest(unittest.TestCase):
 
     def test_duplicate_categorical_values(self):
         X = [['a'], ['b'], ['c'], ['b'], ['c'], ['b']]
-        predicates = list(decision_tree.propose_split_predicates(X))
+        Y = [0, 0, 0]
+        impurity = decision_tree.gini_impurity
+        predicates = list(
+            decision_tree.propose_split_predicates(X, Y, impurity))
         self.assertCountEqual(predicates, [
             decision_tree.EqualityPredicate(0, 'a'),
             decision_tree.EqualityPredicate(0, 'b'),
@@ -118,7 +125,10 @@ class ProposeSplitPartitionsTest(unittest.TestCase):
 
     def test_proposes_splits_for_all_features(self):
         X = [['a', 'A'], ['b', 'B']]
-        predicates = list(decision_tree.propose_split_predicates(X))
+        Y = [0, 0, 0]
+        impurity = decision_tree.gini_impurity
+        predicates = list(
+            decision_tree.propose_split_predicates(X, Y, impurity))
         self.assertCountEqual(predicates, [
             decision_tree.EqualityPredicate(0, 'a'),
             decision_tree.EqualityPredicate(0, 'b'),
@@ -131,6 +141,8 @@ class ProposeSplitPartitionsTest(unittest.TestCase):
         # duplicate numerical features
         #...
         # raises error for unsupported feature type
+        # TODO: test fast and slow propose predicates find splits with equal
+        # information gain
         pass
 
 class PartitionTest(unittest.TestCase):

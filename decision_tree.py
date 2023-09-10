@@ -28,21 +28,21 @@ def is_numerical(x):
 def is_categorical(x):
     return type(x) == str
 
-def entropy_impurity(Y):
-    counts = Counter(Y)
+def entropy_impurity(counts):
     entropy = 0
+    total = sum(counts.values())
     for value_count in counts.values():
-        p = value_count/len(Y)
+        p = value_count/total
         entropy -= p*math.log(p)
     return entropy
 
-def gini_impurity(Y):
-    if not Y:
+def gini_impurity(counts):
+    if not counts:
         return 0
-    counts = Counter(Y)
+    total = sum(counts.values())
     sum_squares = 0
     for value_count in counts.values():
-        p = value_count/len(Y)
+        p = value_count/total
         sum_squares += p*p
     return 1 - sum_squares
 
@@ -82,15 +82,51 @@ class EqualityPredicate:
             self.feature_index == other.feature_index and
             self.value == other.value)
 
-def propose_split_predicates(X):
+def fast_propose_threshold_predicate(X, Y, feature_index, impurity):
+    Xs, Ys = zip(*sorted(zip([x[feature_index] for x in X], Y)))
+    left_counts = Counter()
+    right_counts = Counter(Ys)
+    best_score = -1
+    best_threshold = None
+    i = 0
+    while i < len(X) - 1:
+        feature_value = Xs[i]
+        while i < len(X) and Xs[i] == feature_value:
+            # Move element from right to left half
+            left_counts.update([Ys[i]])
+            right_counts.subtract([Ys[i]])
+            i += 1
+        if i == len(X):
+            # Skip no-op split
+            break
+        assert(sum(left_counts.values()) == i)
+        assert(sum(right_counts.values()) == (len(X) - i))
+        score = (impurity(left_counts)*i + impurity(right_counts)*(len(X) - i))
+        if score > best_score:
+            best_score = score
+            best_threshold = (Xs[i - 1] + Xs[i])/2
+    return best_threshold
+
+def propose_split_predicates(X, Y, impurity, slow=False):
     for i in range(len(X[0])):
-        unique_values = {x[i] for x in X}
         if is_numerical(X[0][i]):
-            ordered_values = sorted(unique_values)
-            for l, r in zip(ordered_values, ordered_values[1:]):
-                midpoint = (l + r)/2.0
-                yield ThresholdPredicate(i, midpoint)
+            if slow:
+                ordered_values = sorted({x[i] for x in X})
+                # Proposing every possible threshold and then splitting the
+                # data to evaluate the split takes O(n^2) time.
+                for l, r in zip(ordered_values, ordered_values[1:]):
+                    midpoint = (l + r)/2.0
+                    yield ThresholdPredicate(i, midpoint)
+                continue
+            # Evaluating thresholds in a linear scan over the sorted data takes
+            # O(n*log(n)) time.
+            best_threshold = fast_propose_threshold_predicate(X, Y, i, impurity)
+            if best_threshold is not None:
+                yield ThresholdPredicate(i, best_threshold)
         elif is_categorical(X[0][i]):
+            # Sort values to avoid non-determinism from hash table iteration
+            # order.
+            unique_values = sorted({x[i] for x in X})
             for value in unique_values:
                 yield EqualityPredicate(i, value)
         else:
@@ -125,13 +161,15 @@ class DecisionTreeClassifier:
 
         best_score = -1
         best_split = None
-        for split_predicate in propose_split_predicates(X):
+        for split_predicate in propose_split_predicates(X, Y, self.impurity):
             X_left, Y_left, X_right, Y_right = partition(X, Y, split_predicate)
             if not X_left or not X_right:
                 continue
             # IG = I(Y) - p_left*I(Y_left) - p_right*I(Y_right)
-            score = (self.impurity(Y_left)*len(Y_left) +
-                        self.impurity(Y_right)*len(Y_right))
+            left_counts = Counter(Y_left)
+            right_counts = Counter(Y_right)
+            score = (self.impurity(left_counts)*len(Y_left) +
+                        self.impurity(right_counts)*len(Y_right))
             if score > best_score:
                 best_score = score
                 best_split = (split_predicate, X_left, Y_left, X_right, Y_right)
@@ -153,6 +191,7 @@ class DecisionTreeClassifier:
     def fit(self, X, Y):
         self.root = self.construct_decision_tree(X, Y, depth=0)
 
+    # TODO: output class probabilities or logits to support gradient boosting
     def predict(self, X):
         return [self.root.predict(x) for x in X]
 
