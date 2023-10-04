@@ -59,6 +59,14 @@ class ThresholdPredicateTest(unittest.TestCase):
         self.assertFalse(predicate([2, 2, 3, 2]))
         self.assertTrue(predicate([4, 4, 2, 4]))
 
+    def test_to_string(self):
+        predicate = decision_tree.ThresholdPredicate(
+            feature_index=2, threshold=3)
+
+        self.assertEqual(str(predicate),
+            'ThresholdPredicate(feature_index=2, threshold=3)')
+
+
 class EqualityPredicateTest(unittest.TestCase):
     def test_equality_predicate(self):
         predicate = decision_tree.EqualityPredicate(
@@ -68,6 +76,13 @@ class EqualityPredicateTest(unittest.TestCase):
         self.assertTrue(predicate(['b', 'a']))
         self.assertFalse(predicate(['a', 'b']))
         self.assertFalse(predicate(['b', 'b']))
+
+    def test_to_string(self):
+        predicate = decision_tree.EqualityPredicate(
+            feature_index=1, value='a')
+
+        self.assertEqual(str(predicate),
+            'EqualityPredicate(feature_index=1, value=\'a\')')
 
 class IsNumericalTest(unittest.TestCase):
     def test_is_numerical_true_for_int(self):
@@ -99,12 +114,34 @@ class IsCategoricalTest(unittest.TestCase):
 
 class ProposeSplitPartitionsTest(unittest.TestCase):
 
-    def test_categorical_feature_has_equality_predicates(self):
+    def run_fast_slow_subtests(self, subtest):
+        'Runs the test with both fast and slow versions of propose splits'
+        for slow in [True, False]:
+            with self.subTest(slow=slow):
+                subtest(slow)
+
+    def subtest_categorical_feature_has_equality_predicates(self, slow):
         X = [['a'], ['b'], ['c']]
         Y = [0, 0, 0]
         impurity = decision_tree.gini_impurity
         predicates = list(
-            decision_tree.propose_split_predicates(X, Y, impurity))
+            decision_tree.propose_split_predicates(X, Y, impurity, slow))
+        self.assertCountEqual(predicates, [
+            decision_tree.EqualityPredicate(0, 'a'),
+            decision_tree.EqualityPredicate(0, 'b'),
+            decision_tree.EqualityPredicate(0, 'c')
+        ])
+
+    def test_categorical_feature_has_equality_predicates(self):
+        self.run_fast_slow_subtests(
+            self.subtest_categorical_feature_has_equality_predicates)
+
+    def subtest_duplicate_categorical_values(self, slow):
+        X = [['a'], ['b'], ['c'], ['b'], ['c'], ['b']]
+        Y = [0, 0, 0]
+        impurity = decision_tree.gini_impurity
+        predicates = list(
+            decision_tree.propose_split_predicates(X, Y, impurity, slow))
         self.assertCountEqual(predicates, [
             decision_tree.EqualityPredicate(0, 'a'),
             decision_tree.EqualityPredicate(0, 'b'),
@@ -112,23 +149,14 @@ class ProposeSplitPartitionsTest(unittest.TestCase):
         ])
 
     def test_duplicate_categorical_values(self):
-        X = [['a'], ['b'], ['c'], ['b'], ['c'], ['b']]
-        Y = [0, 0, 0]
-        impurity = decision_tree.gini_impurity
-        predicates = list(
-            decision_tree.propose_split_predicates(X, Y, impurity))
-        self.assertCountEqual(predicates, [
-            decision_tree.EqualityPredicate(0, 'a'),
-            decision_tree.EqualityPredicate(0, 'b'),
-            decision_tree.EqualityPredicate(0, 'c')
-        ])
+        self.run_fast_slow_subtests(self.subtest_duplicate_categorical_values)
 
-    def test_proposes_splits_for_all_features(self):
+    def subtest_proposes_splits_for_all_features(self, slow):
         X = [['a', 'A'], ['b', 'B']]
         Y = [0, 0, 0]
         impurity = decision_tree.gini_impurity
         predicates = list(
-            decision_tree.propose_split_predicates(X, Y, impurity))
+            decision_tree.propose_split_predicates(X, Y, impurity, slow))
         self.assertCountEqual(predicates, [
             decision_tree.EqualityPredicate(0, 'a'),
             decision_tree.EqualityPredicate(0, 'b'),
@@ -136,25 +164,37 @@ class ProposeSplitPartitionsTest(unittest.TestCase):
             decision_tree.EqualityPredicate(1, 'B'),
         ])
 
-        # TODO: multiple indicies
+    def test_proposes_splits_for_all_features(self):
+        self.run_fast_slow_subtests(
+            self.subtest_proposes_splits_for_all_features)
+
+        # TODO:
         # numerical features
         # duplicate numerical features
         #...
         # raises error for unsupported feature type
-        # TODO: test fast and slow propose predicates find splits with equal
-        # information gain
-        pass
+        # find way to run all other tests for slow=true and slow=false
 
 class PartitionTest(unittest.TestCase):
     def test(self):
         pass
 
-# TODO: stop splitting test
-
 class TerminalNodeTest(unittest.TestCase):
     def test_predicts_most_common_value(self):
         node = decision_tree.TerminalNode([1,2,2,2,3,4])
         self.assertEqual(node.predict(['a','b','c']), 2)
+
+    def test_predicts_provided_value(self):
+        node = decision_tree.TerminalNode(value=2)
+        self.assertEqual(node.predict(['a','b','c']), 2)
+
+    def test_raises_error_if_both_value_and_elements_provided(self):
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            decision_tree.TerminalNode(Y=[1,2,3], value=2)
+
+    def test_to_string(self):
+        node = decision_tree.TerminalNode(value=2)
+        self.assertEqual(str(node), 'TerminalNode(value=2)')
 
 class InteriorNodeTest(unittest.TestCase):
     def test_predicts_left_if_predicate_true(self):
@@ -173,7 +213,60 @@ class InteriorNodeTest(unittest.TestCase):
         )
         self.assertEqual(node.predict(['x','b','x']), 'right')
 
-# TODO: construct decision tree test
+    def test_to_string(self):
+        node = decision_tree.InteriorNode(
+            predicate=decision_tree.EqualityPredicate(1, 'a'),
+            left=decision_tree.InteriorNode(
+                predicate=decision_tree.EqualityPredicate(2, 'b'),
+                left=decision_tree.TerminalNode(['x']),
+                right=decision_tree.TerminalNode(['y'])
+            ),
+            right=decision_tree.TerminalNode(['z'])
+        )
+        self.assertEqual(str(node),
+'''InteriorNode(predicate=EqualityPredicate(feature_index=1, value='a'),
+  left=InteriorNode(predicate=EqualityPredicate(feature_index=2, value='b'),
+    left=TerminalNode(value='x'),
+    right=TerminalNode(value='y')),
+  right=TerminalNode(value='z'))''')
+
+class DecisionTreeClassifierTest(unittest.TestCase):
+    def test_stop_splitting_at_max_depth(self):
+        model = decision_tree.DecisionTreeClassifier(max_depth=1)
+        model.fit([[1], [2], [3], [4]], [0, 1, 0, 1])
+        self.assertEqual(type(model.root), decision_tree.InteriorNode)
+        self.assertEqual(type(model.root.left), decision_tree.TerminalNode)
+        self.assertEqual(type(model.root.right), decision_tree.TerminalNode)
+
+    def test_stop_splitting_pure_nodes(self):
+        model = decision_tree.DecisionTreeClassifier()
+        model.fit([[1, -1], [0, -2], [1, -3]], [1, 1, 1])
+        self.assertEqual(str(model.root),
+            str(decision_tree.TerminalNode(value=1)))
+
+    def test_should_split_on_best_feature(self):
+        model = decision_tree.DecisionTreeClassifier()
+        model.fit([[1, 0], [1, 1], [1, 1]], [0, 1, 1])
+        self.assertEqual(
+            str(model.root),
+            str(decision_tree.InteriorNode(
+                predicate=decision_tree.ThresholdPredicate(
+                    feature_index=1, threshold=0.5),
+                left=decision_tree.TerminalNode(value=0),
+                right=decision_tree.TerminalNode(value=1))))
+
+    def test_should_pick_best_split(self):
+        model = decision_tree.DecisionTreeClassifier()
+        model.fit([[1, -1], [0, -2], [1, -3]], [0, 1, 1])
+        self.assertEqual(
+            str(model.root),
+            str(decision_tree.InteriorNode(
+                predicate=decision_tree.ThresholdPredicate(
+                    feature_index=1, threshold=-1.5),
+                left=decision_tree.TerminalNode(value=1),
+                right=decision_tree.TerminalNode(value=0))))
+
+    # TODO: write assertTreesEqual method with nicer error messages
 
 if __name__ == '__main__':
     unittest.main()

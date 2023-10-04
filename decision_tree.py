@@ -3,12 +3,23 @@ import math
 from collections import Counter
 
 class TerminalNode:
-    def __init__(self, Y):
-        # Predict the most common class
-        self.value = Counter(Y).most_common(1)[0][0]
+    def __init__(self, Y=[], value=None):
+        if value is not None and Y:
+            raise ValueError('Specify exactly one of Y or value')
+        if value is not None:
+            self.value = value
+        else:
+            # Predict the most common class
+            self.value = Counter(Y).most_common(1)[0][0]
 
     def predict(self, x):
         return self.value
+
+    def __repr__(self, indent=None):
+        return 'TerminalNode(value=%r)' % (self.value,)
+
+    def __eq__(self, other):
+        return self.value == other.value
 
 class InteriorNode:
     def __init__(self, predicate, left, right):
@@ -21,6 +32,17 @@ class InteriorNode:
             return self.left.predict(x)
         else:
             return self.right.predict(x)
+
+    def __repr__(self, indent=0):
+        return 'InteriorNode(predicate=%r,\n%sleft=%s,\n%sright=%s)' % (
+            self.predicate,
+            ' '*(indent + 2),
+            self.left.__repr__(indent + 2),
+            ' '*(indent + 2),
+            self.right.__repr__(indent + 2))
+
+    def __eq__(self, other):
+        return self.value == other.value
 
 def is_numerical(x):
     return type(x) == int or type(x) == float
@@ -86,7 +108,7 @@ def fast_propose_threshold_predicate(X, Y, feature_index, impurity):
     Xs, Ys = zip(*sorted(zip([x[feature_index] for x in X], Y)))
     left_counts = Counter()
     right_counts = Counter(Ys)
-    best_score = -1
+    best_score = float('inf')
     best_threshold = None
     i = 0
     while i < len(X) - 1:
@@ -102,7 +124,7 @@ def fast_propose_threshold_predicate(X, Y, feature_index, impurity):
         assert(sum(left_counts.values()) == i)
         assert(sum(right_counts.values()) == (len(X) - i))
         score = (impurity(left_counts)*i + impurity(right_counts)*(len(X) - i))
-        if score > best_score:
+        if score < best_score:
             best_score = score
             best_threshold = (Xs[i - 1] + Xs[i])/2
     return best_threshold
@@ -159,7 +181,7 @@ class DecisionTreeClassifier:
         if is_pure(Y) or depth >= self.max_depth:
             return TerminalNode(Y)
 
-        best_score = -1
+        best_score = float('inf')
         best_split = None
         for split_predicate in propose_split_predicates(X, Y, self.impurity):
             X_left, Y_left, X_right, Y_right = partition(X, Y, split_predicate)
@@ -170,7 +192,7 @@ class DecisionTreeClassifier:
             right_counts = Counter(Y_right)
             score = (self.impurity(left_counts)*len(Y_left) +
                         self.impurity(right_counts)*len(Y_right))
-            if score > best_score:
+            if score < best_score:
                 best_score = score
                 best_split = (split_predicate, X_left, Y_left, X_right, Y_right)
 
