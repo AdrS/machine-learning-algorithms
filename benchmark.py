@@ -1,6 +1,7 @@
 import csv
 import decision_tree
 
+from collections import Counter
 from sklearn.model_selection import train_test_split
 
 class Field:
@@ -98,11 +99,23 @@ class DontGetKickedDataset(CsvDataset):
         target_field=Field('IsBadBuy', 1, int),
         skip_header=True)
 
+def print_dataset_stats(X, Y):
+    class_frequencies = Counter(Y)
+    print('Num classes:', len(class_frequencies))
+    print('Num features:', len(X[0]))
+    print('Num examples:', len(Y))
+    print('Higest frequency: %f%%' % (
+        class_frequencies.most_common(1)[0][1]/len(Y)*100))
+    if len(class_frequencies) <= 10:
+        for label, freq in class_frequencies.items():
+            print('%f%% class %r' % (freq/len(Y)*100, label))
 
 if __name__ == '__main__':
     #dataset = CensusIncomeDataset()
     dataset = DontGetKickedDataset()
     X, Y = dataset.load()
+
+    print_dataset_stats(X, Y)
 
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y,
         test_size=0.25, random_state=2001)
@@ -116,5 +129,6 @@ if __name__ == '__main__':
     if max_depth < 6:
         print('Model:')
         print(model.export_text(dataset.feature_names()))
+    print('\n')
     print('Training Accuracy', model.score(X_train, Y_train))
     print('Validation Accuracy', model.score(X_val, Y_val))
