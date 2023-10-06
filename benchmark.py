@@ -1,3 +1,4 @@
+import argparse
 import csv
 import decision_tree
 
@@ -99,36 +100,150 @@ class DontGetKickedDataset(CsvDataset):
         target_field=Field('IsBadBuy', 1, int),
         skip_header=True)
 
-def print_dataset_stats(X, Y):
-    class_frequencies = Counter(Y)
-    print('Num classes:', len(class_frequencies))
-    print('Num features:', len(X[0]))
-    print('Num examples:', len(Y))
-    print('Higest frequency: %f%%' % (
-        class_frequencies.most_common(1)[0][1]/len(Y)*100))
-    if len(class_frequencies) <= 10:
-        for label, freq in class_frequencies.items():
-            print('%f%% class %r' % (freq/len(Y)*100, label))
+class AmazonEmployeeAccessDataset(CsvDataset):
+    def __init__(self, path='data/amazon-employee-access-challenge-train.csv'):
+        super().__init__(path, feature_fields = [
+            Field('RESOURCE', 1),
+            Field('MGR_ID', 2),
+            Field('ROLE_ROLLUP_1', 3),
+            Field('ROLE_ROLLUP_2', 4),
+            Field('ROLE_DEPTNAME', 5),
+            Field('ROLE_TITLE', 6),
+            Field('ROLE_FAMILY_DESC', 7),
+            Field('ROLE_FAMILY', 8),
+            Field('ROLE_CODE', 9),
+        ],
+        target_field=Field('ACTION', 0, int),
+        skip_header=True)
+
+class BostonHousing(CsvDataset):
+    def __init__(self, path='data/boston-housing/train.csv'):
+        super().__init__(path, feature_fields = [
+            #Field('ID', 0, float),
+            Field('crim', 1, float),
+            Field('zn', 2, float),
+            Field('indus', 3, float),
+            Field('chas', 4, float),
+            Field('nox', 5, float),
+            Field('rm', 6, float),
+            Field('age', 7, float),
+            Field('dis', 8, float),
+            Field('rad', 9, float),
+            Field('tax', 10, float),
+            Field('ptratio', 11, float),
+            Field('black', 12, float),
+            Field('lstat', 13, float),
+        ],
+        target_field=Field('medv', 14, float),
+        skip_header=True)
+
+class CaliforniaHousing(CsvDataset):
+    def __init__(self, path='data/CaliforniaHousing/cal_housing.data'):
+        super().__init__(path, feature_fields = [
+            Field('longitude', 0, float),
+            Field('latitude', 1, float),
+            Field('housingMedianAge', 2, float),
+            Field('totalRooms', 3, float),
+            Field('totalBedrooms', 4, float),
+            Field('population', 5, float),
+            Field('households', 6, float),
+            Field('medianIncome', 7, float),
+        ],
+        target_field=Field('medianHouseValue', 8, float),
+        skip_header=False)
+
+class Benchmark:
+    def __init__(self, dataset):
+        self.dataset = dataset
+
+    def load(self):
+        return self.dataset.load()
+
+    def print_dataset_stats(self, X, Y):
+        raise NotImplementedError
+
+class ClassificationBenchmark(Benchmark):
+    def __init__(self, dataset):
+        super().__init__(dataset)
+
+    def print_dataset_stats(self, X, Y):
+        class_frequencies = Counter(Y)
+        print('Num classes:', len(class_frequencies))
+        print('Num features:', len(X[0]))
+        print('Num examples:', len(Y))
+        print('Higest frequency: %f%%' % (
+            class_frequencies.most_common(1)[0][1]/len(Y)*100))
+        if len(class_frequencies) <= 10:
+            for label, freq in class_frequencies.items():
+                print('%f%% class %r' % (freq/len(Y)*100, label))
+
+class RegressionBenchmark(Benchmark):
+    def __init__(self, dataset):
+        super().__init__(dataset)
+
+    def print_dataset_stats(self, X, Y):
+        mean = sum(Y)/len(Y)
+        variance = sum(y*y for y in Y)/len(Y) - mean*mean
+        print('Target mean', mean)
+        print('Target variance', variance)
+        print('Num features:', len(X[0]))
+        print('Num examples:', len(Y))
+        # TODO: print correlation between features
+
+class Model:
+    def fit(self, X_train, Y_train):
+        raise NotImplementedError
+
+    def eval(self, X_train, Y_train, X_val, Y_val, dataset):
+        raise NotImplementedError
+
+class DecisionTreeClassifier(Model):
+    def __init__(self):
+        self.max_depth=999999
+        self.model = decision_tree.DecisionTreeClassifier(
+            max_depth=self.max_depth)
+
+    def fit(self, X_train, Y_train):
+        self.model.fit(X_train, Y_train)
+
+    def eval(self, X_train, Y_train, X_val, Y_val, dataset):
+        if self.max_depth < 6:
+            print('Model:')
+            print(self.model.export_text(dataset.feature_names()))
+        print('Training Accuracy', self.model.score(X_train, Y_train))
+        print('Validation Accuracy', self.model.score(X_val, Y_val))
 
 if __name__ == '__main__':
-    #dataset = CensusIncomeDataset()
-    dataset = DontGetKickedDataset()
-    X, Y = dataset.load()
+    benchmarks = {
+        'census-income': ClassificationBenchmark(CensusIncomeDataset()),
+        'dont-get-kicked': ClassificationBenchmark(DontGetKickedDataset()),
+        'amazon-employee-access': ClassificationBenchmark(AmazonEmployeeAccessDataset()),
+        'boston-housing': RegressionBenchmark(BostonHousing()),
+        'california-housing': RegressionBenchmark(CaliforniaHousing()),
+    }
+    models = {
+        'DecisionTreeClassifier': DecisionTreeClassifier
+    }
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--benchmarks', choices=list(benchmarks.keys()),
+        default=[], nargs='*')
+    parser.add_argument('--models', choices=list(models.keys()),
+        default=[], nargs='*')
+    args = parser.parse_args()
+    for benchmark_name in args.benchmarks:
+        print('Benchmark:', benchmark_name)
+        benchmark = benchmarks[benchmark_name]
+        X, Y = benchmark.load()
+        benchmark.print_dataset_stats(X, Y)
+        X_train, X_val, Y_train, Y_val = train_test_split(X, Y,
+            test_size=0.25, random_state=2001)
 
-    print_dataset_stats(X, Y)
-
-    X_train, X_val, Y_train, Y_val = train_test_split(X, Y,
-        test_size=0.25, random_state=2001)
-    # TODO: optimize implementation to support larger datasets
-    max_dataset_size = 1000
-    X_train, Y_train = X_train[:max_dataset_size], Y_train[:max_dataset_size]
-
-    max_depth=999999
-    model = decision_tree.DecisionTreeClassifier(max_depth=max_depth)
-    model.fit(X_train, Y_train)
-    if max_depth < 6:
-        print('Model:')
-        print(model.export_text(dataset.feature_names()))
-    print('\n')
-    print('Training Accuracy', model.score(X_train, Y_train))
-    print('Validation Accuracy', model.score(X_val, Y_val))
+        # TODO: optimize implementation to support larger datasets
+        max_dataset_size = 1000
+        X_train, Y_train = X_train[:max_dataset_size], Y_train[:max_dataset_size]
+        for model_name in args.models:
+            print('\nModel:', model_name)
+            model = models[model_name]()
+            model.fit(X_train, Y_train)
+            model.eval(X_train, Y_train, X_val, Y_val, benchmark.dataset)
+        print('\n')
