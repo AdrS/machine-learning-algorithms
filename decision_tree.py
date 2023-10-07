@@ -68,8 +68,11 @@ def gini_impurity(counts):
         sum_squares += p*p
     return 1 - sum_squares
 
+def average(X):
+    return sum(X)/len(X)
+
 def variance(X):
-    mu = sum(X)/len(X)
+    mu = average(X)
     return sum(x*x for x in X)/len(X) - mu*mu
 
 def median(X):
@@ -187,21 +190,25 @@ def partition(X, Y, split_predicate):
             Y_right.append(y)
     return X_left, Y_left, X_right, Y_right
 
-def is_pure(Y):
-    for y in Y:
-        if y != Y[0]:
-            return False
-    return True
+def score_split(Y_left, Y_right, impurity):
+    # IG = I(Y) - p_left*I(Y_left) - p_right*I(Y_right)
+    return impurity(Y_left)*len(Y_left) + impurity(Y_right)*len(Y_right)
 
-class DecisionTreeClassifier:
-    def __init__(self, impurity=gini_impurity, max_depth=99999):
+class DecisionTree:
+    def __init__(self, impurity, max_depth):
         self.root = None
         self.impurity = impurity
         self.max_depth = max_depth
 
+    def is_pure(self, Y):
+        raise NotImplementedError
+
+    def create_terminal_node(self, Y):
+        raise NotImplementedError
+
     def construct_decision_tree(self, X, Y, depth):
-        if is_pure(Y) or depth >= self.max_depth:
-            return TerminalNode(Y)
+        if self.is_pure(Y) or depth >= self.max_depth:
+            return self.create_terminal_node(Y)
 
         best_score = float('inf')
         best_split = None
@@ -209,11 +216,8 @@ class DecisionTreeClassifier:
             X_left, Y_left, X_right, Y_right = partition(X, Y, split_predicate)
             if not X_left or not X_right:
                 continue
-            # IG = I(Y) - p_left*I(Y_left) - p_right*I(Y_right)
-            left_counts = Counter(Y_left)
-            right_counts = Counter(Y_right)
-            score = (self.impurity(left_counts)*len(Y_left) +
-                        self.impurity(right_counts)*len(Y_right))
+            score = score_split(Y_left, Y_right, self.impurity)
+
             if score < best_score:
                 best_score = score
                 best_split = (split_predicate, X_left, Y_left, X_right, Y_right)
@@ -223,7 +227,7 @@ class DecisionTreeClassifier:
             # - min samples per leaf
             # - min information gain
             # TODO: best first search for to support max leaf nodes
-            return TerminalNode(Y)
+            return self.create_terminal_node(Y)
 
         split_predicate, X_left, Y_left, X_right, Y_right = best_split
         return InteriorNode(
@@ -234,15 +238,11 @@ class DecisionTreeClassifier:
     def fit(self, X, Y):
         self.root = self.construct_decision_tree(X, Y, depth=0)
 
-    # TODO: output class probabilities or logits to support gradient boosting
     def predict(self, X):
         return [self.root.predict(x) for x in X]
 
     def score(self, X, Y):
-        num_correct = 0
-        for prediction, target in zip(self.predict(X), Y):
-            num_correct += (prediction == target)
-        return num_correct/len(X)
+        raise NotImplementedError
 
     def export_text(self, feature_names):
         parts = []
@@ -279,3 +279,56 @@ class DecisionTreeClassifier:
                 raise TypeError(f'Unknown node type {type(node)}')
         f(self.root, indent=0)
         return ''.join(parts)
+
+class DecisionTreeClassifier(DecisionTree):
+    def __init__(self, impurity=gini_impurity, max_depth=99999):
+        def wrapped_impurity(Y):
+            # TODO: see if there is a good way to avoid this
+            if type(Y) == Counter:
+                return impurity(Y)
+            else:
+                return impurity(Counter(Y))
+        super().__init__(wrapped_impurity, max_depth)
+
+    def is_pure(self, Y):
+        for y in Y:
+            if y != Y[0]:
+                return False
+        return True
+
+    def create_terminal_node(self, Y):
+        return TerminalNode(Y)
+
+    def score(self, X, Y):
+        num_correct = 0
+        for prediction, target in zip(self.predict(X), Y):
+            num_correct += (prediction == target)
+        return num_correct/len(X)
+
+class DecisionTreeRegressor(DecisionTree):
+    def __init__(self, impurity=mean_squared_error_impurity, max_depth=99999,
+            purity_tolerance=1e-4):
+        super().__init__(impurity, max_depth)
+        self.compute_optimal_value = {
+            mean_squared_error_impurity:average,
+            mean_absolute_error_impurity:median
+        }[impurity]
+        self.loss = {
+            mean_squared_error_impurity:(lambda y_pred, y: (y - y_pred)**2),
+            mean_absolute_error_impurity:(lambda y_pred, y: abs(y - y_pred))
+        }[impurity]
+        self.purity_tolerance = purity_tolerance
+
+    def is_pure(self, Y):
+        if not Y:
+            return True
+        return max(Y) - min(Y) < self.purity_tolerance
+
+    def create_terminal_node(self, Y):
+        return TerminalNode(value=self.compute_optimal_value(Y))
+
+    def score(self, X, Y):
+        total_loss = 0
+        for prediction, target in zip(self.predict(X), Y):
+            total_loss += self.loss(prediction, target)
+        return total_loss/len(X)

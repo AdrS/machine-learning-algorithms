@@ -213,6 +213,23 @@ class DecisionTreeClassifier(Model):
         print('Training Accuracy', self.model.score(X_train, Y_train))
         print('Validation Accuracy', self.model.score(X_val, Y_val))
 
+class DecisionTreeRegressor(Model):
+    def __init__(self):
+        self.max_depth=999999
+        self.model = decision_tree.DecisionTreeRegressor(
+            max_depth=self.max_depth)
+
+    def fit(self, X_train, Y_train):
+        self.model.fit(X_train, Y_train)
+
+    def eval(self, X_train, Y_train, X_val, Y_val, dataset):
+        if self.max_depth < 6:
+            print('Model:')
+            print(self.model.export_text(dataset.feature_names()))
+        print('Training loss', self.model.score(X_train, Y_train))
+        print('Validation loss', self.model.score(X_val, Y_val))
+
+
 if __name__ == '__main__':
     benchmarks = {
         'census-income': ClassificationBenchmark(CensusIncomeDataset()),
@@ -222,7 +239,8 @@ if __name__ == '__main__':
         'california-housing': RegressionBenchmark(CaliforniaHousing()),
     }
     models = {
-        'DecisionTreeClassifier': DecisionTreeClassifier
+        'DecisionTreeClassifier': DecisionTreeClassifier,
+        'DecisionTreeRegressor': DecisionTreeRegressor
     }
     parser = argparse.ArgumentParser()
     parser.add_argument('--benchmarks', choices=list(benchmarks.keys()),

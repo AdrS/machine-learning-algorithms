@@ -314,6 +314,7 @@ class DecisionTreeClassifierTest(unittest.TestCase):
                 right=decision_tree.TerminalNode(value=0))))
 
     # TODO: write assertTreesEqual method with nicer error messages
+    # TODO: tests for regression
 
 if __name__ == '__main__':
     unittest.main()
