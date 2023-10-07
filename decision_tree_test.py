@@ -44,6 +44,53 @@ class GiniImpurityTest(unittest.TestCase):
             decision_tree.gini_impurity(Counter([1,1,1,1,1,1])),
             0)
 
+class MeanSquaredErrorImpurityTest(unittest.TestCase):
+    def test_empy_set_has_0_impurity(self):
+        self.assertAlmostEqual(
+            decision_tree.mean_squared_error_impurity([]), 0)
+
+    def test_uniform_distribution(self):
+        self.assertAlmostEqual(
+            decision_tree.mean_squared_error_impurity([1,1,2,2]), 0.25)
+
+    def test_unequal_distribution(self):
+        self.assertAlmostEqual(
+            decision_tree.mean_squared_error_impurity([1,2,2, 3,3,3]),
+            ((1 - 14/6)**2 + 2*(2 - 14/6)**2 + 3*(3 - 14/6)**2)/6)
+
+    def test_point_distribution_has_0_impurity(self):
+        self.assertAlmostEqual(
+            decision_tree.mean_squared_error_impurity([1,1,1,1,1,1]),
+            0)
+
+class MeanAbsoluteErrorImpurityTest(unittest.TestCase):
+    def test_empy_set_has_0_impurity(self):
+        self.assertAlmostEqual(
+            decision_tree.mean_absolute_error_impurity([]), 0)
+
+    def test_uniform_distribution(self):
+        self.assertAlmostEqual(
+            decision_tree.mean_absolute_error_impurity([1,2,3,4]),
+            (1.5 + 0.5 + 0.5 + 1.5)/4)
+
+    def test_odd_length(self):
+        self.assertAlmostEqual(
+            decision_tree.mean_absolute_error_impurity([1,2,3]), (1 + 0 + 1)/3)
+
+    def test_even_length(self):
+        self.assertAlmostEqual(
+            decision_tree.mean_absolute_error_impurity([0, 0, 2, 2]), 1)
+
+    def test_unequal_distribution(self):
+        self.assertAlmostEqual(
+            decision_tree.mean_absolute_error_impurity([1,2,2, 3,3,3]),
+            ((14/6 - 1) + 2*(14/6 - 2) + 3*(3 - 14/6))/6)
+
+    def test_point_distribution_has_0_impurity(self):
+        self.assertAlmostEqual(
+            decision_tree.mean_absolute_error_impurity([1,1,1,1,1,1]),
+            0)
+
 class ThresholdPredicateTest(unittest.TestCase):
 
     def test_threshold_predicate(self):

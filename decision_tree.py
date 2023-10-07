@@ -68,6 +68,28 @@ def gini_impurity(counts):
         sum_squares += p*p
     return 1 - sum_squares
 
+def variance(X):
+    mu = sum(X)/len(X)
+    return sum(x*x for x in X)/len(X) - mu*mu
+
+def median(X):
+    X.sort()
+    if len(X) % 2 == 0:
+        return (X[len(X)//2] + X[len(X)//2 - 1])/2
+    else:
+        return X[len(X)//2]
+
+def mean_squared_error_impurity(Y):
+    if not Y:
+        return 0
+    return variance(Y)
+
+def mean_absolute_error_impurity(Y):
+    if not Y:
+        return 0
+    m = median(Y)
+    return sum(abs(y - m) for y in Y)/len(Y)
+
 # TODO: log loss impurity
 
 class ThresholdPredicate:
@@ -208,7 +230,6 @@ class DecisionTreeClassifier:
             split_predicate,
             self.construct_decision_tree(X_left, Y_left, depth + 1),
             self.construct_decision_tree(X_right, Y_right, depth + 1))
-
 
     def fit(self, X, Y):
         self.root = self.construct_decision_tree(X, Y, depth=0)
