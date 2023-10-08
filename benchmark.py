@@ -207,11 +207,18 @@ class DecisionTreeClassifier(Model):
         self.model.fit(X_train, Y_train)
 
     def eval(self, X_train, Y_train, X_val, Y_val, dataset):
+        print('Before pruning')
+        print('Training Accuracy', self.model.score(X_train, Y_train))
+        print('Validation Accuracy', self.model.score(X_val, Y_val))
+
+        # TODO: move out of eval
+        self.model.prune(X_val, Y_val)
+        print('After pruning')
+        print('Training Accuracy', self.model.score(X_train, Y_train))
+        print('Validation Accuracy', self.model.score(X_val, Y_val))
         if self.max_depth < 6:
             print('Model:')
             print(self.model.export_text(dataset.feature_names()))
-        print('Training Accuracy', self.model.score(X_train, Y_train))
-        print('Validation Accuracy', self.model.score(X_val, Y_val))
 
 class DecisionTreeRegressor(Model):
     def __init__(self):
@@ -223,11 +230,19 @@ class DecisionTreeRegressor(Model):
         self.model.fit(X_train, Y_train)
 
     def eval(self, X_train, Y_train, X_val, Y_val, dataset):
+        print('Before pruning')
+        print('Training loss', self.model.score(X_train, Y_train))
+        print('Validation loss', self.model.score(X_val, Y_val))
+
+        # TODO: move out of eval
+        self.model.prune(X_val, Y_val)
+        print('After pruning')
+        print('Training loss', self.model.score(X_train, Y_train))
+        print('Validation loss', self.model.score(X_val, Y_val))
+
         if self.max_depth < 6:
             print('Model:')
             print(self.model.export_text(dataset.feature_names()))
-        print('Training loss', self.model.score(X_train, Y_train))
-        print('Validation loss', self.model.score(X_val, Y_val))
 
 
 if __name__ == '__main__':

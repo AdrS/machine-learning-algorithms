@@ -199,6 +199,8 @@ class DecisionTree:
         self.root = None
         self.impurity = impurity
         self.max_depth = max_depth
+        # Alpha value and a replacement terminal node for each branch.
+        self.branch_pruning_info = None
 
     def is_pure(self, Y):
         raise NotImplementedError
@@ -206,9 +208,18 @@ class DecisionTree:
     def create_terminal_node(self, Y):
         raise NotImplementedError
 
-    def construct_decision_tree(self, X, Y, depth):
+    def construct_decision_tree(self, X, Y, num_examples, depth):
+        '''Constructs a decision tree from training data X, Y
+
+        Returns:
+            root - root of the tree
+            size - number of nodes in the tree
+            cost - sum over leaf t of p(t)*impurity(t)
+        '''
+        node_cost = len(Y)/num_examples*self.impurity(Y)
+        terminal_node = self.create_terminal_node(Y)
         if self.is_pure(Y) or depth >= self.max_depth:
-            return self.create_terminal_node(Y)
+            return terminal_node, 1, node_cost
 
         best_score = float('inf')
         best_split = None
@@ -227,22 +238,58 @@ class DecisionTree:
             # - min samples per leaf
             # - min information gain
             # TODO: best first search for to support max leaf nodes
-            return self.create_terminal_node(Y)
+            return terminal_node, 1, node_cost
 
         split_predicate, X_left, Y_left, X_right, Y_right = best_split
-        return InteriorNode(
-            split_predicate,
-            self.construct_decision_tree(X_left, Y_left, depth + 1),
-            self.construct_decision_tree(X_right, Y_right, depth + 1))
+        left_branch, left_size, left_cost = self.construct_decision_tree(
+            X_left, Y_left, num_examples, depth + 1)
+        right_branch, right_size, right_cost = self.construct_decision_tree(
+            X_right, Y_right, num_examples, depth + 1)
+        branch_size = left_size + right_size + 1
+        branch_cost = left_cost + right_cost
+        branch = InteriorNode(split_predicate, left_branch, right_branch)
+        alpha = (node_cost - branch_cost)/(branch_size - 1)
+        self.branch_pruning_info[id(branch)] = (alpha, terminal_node)
+        return branch, branch_size, branch_cost
 
     def fit(self, X, Y):
-        self.root = self.construct_decision_tree(X, Y, depth=0)
+        self.branch_pruning_info = {}
+        self.root, _, _ = self.construct_decision_tree(
+                X, Y, num_examples=len(Y), depth=0)
 
     def predict(self, X):
         return [self.root.predict(x) for x in X]
 
     def score(self, X, Y):
         raise NotImplementedError
+
+    def _loss(self, root, X, Y):
+        raise NotImplementedError
+
+    def cost_complexity_prune(self, alpha):
+        def prune(node):
+            if type(node) == TerminalNode:
+                return node
+            node_alpha, terminal_node = self.branch_pruning_info[id(node)]
+            if node_alpha <= alpha:
+                return terminal_node
+            return InteriorNode(
+                node.predicate, prune(node.left), prune(node.right))
+        return prune(self.root)
+
+    def prune(self, X_validation, Y_validation):
+        best_tree = self.root
+        best_loss = float('inf')
+        alphas = sorted([alpha for alpha, _ in
+            self.branch_pruning_info.values()])
+        for alpha in alphas:
+            tree = self.cost_complexity_prune(alpha)
+            loss = self._loss(tree, X_validation, Y_validation)
+            if loss <= best_loss:
+                best_loss = loss
+                best_tree = tree
+        # TODO: return a new DecisionTree object instead?
+        self.root = best_tree
 
     def export_text(self, feature_names):
         parts = []
@@ -305,6 +352,10 @@ class DecisionTreeClassifier(DecisionTree):
             num_correct += (prediction == target)
         return num_correct/len(X)
 
+    def _loss(self, root, X, Y):
+        num_correct = sum(int(root.predict(x) == y) for x, y in zip(X, Y))
+        return -num_correct/len(X)
+
 class DecisionTreeRegressor(DecisionTree):
     def __init__(self, impurity=mean_squared_error_impurity, max_depth=99999,
             purity_tolerance=1e-4):
@@ -328,7 +379,14 @@ class DecisionTreeRegressor(DecisionTree):
         return TerminalNode(value=self.compute_optimal_value(Y))
 
     def score(self, X, Y):
+        #total_loss = 0
+        #for prediction, target in zip(self.predict(X), Y):
+        #    total_loss += self.loss(prediction, target)
+        #return total_loss/len(X)
+        return self._loss(self.root, X, Y)
+
+    def _loss(self, root, X, Y):
         total_loss = 0
-        for prediction, target in zip(self.predict(X), Y):
-            total_loss += self.loss(prediction, target)
+        for x, y in zip(X, Y):
+            total_loss += self.loss(root.predict(x), y)
         return total_loss/len(X)
