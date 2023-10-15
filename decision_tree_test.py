@@ -504,5 +504,29 @@ class DecisionTreeRegressorTest(DecisionTreeTestCase):
 
     # TODO: prune, score, loss, export text
 
+class DecisionStumpClassifierTest(DecisionTreeTestCase):
+
+    def test_stump_has_single_node(self):
+        model = decision_tree.DecisionStumpClassifier()
+        model.fit([[1], [2], [3]], [0, 1, 0])
+        self.assertEqual(type(model.root), decision_tree.TerminalNode)
+
+    def test_stump_predicts_most_common_class(self):
+        model = decision_tree.DecisionStumpClassifier()
+        model.fit([[1], [2], [3]], [0, 1, 0])
+        self.assertEqual(model.predict([0, 1, 2, 3, 4]), [0]*5)
+
+class DecisionStumpRegressorTest(DecisionTreeTestCase):
+
+    def test_stump_has_single_node(self):
+        model = decision_tree.DecisionStumpRegressor()
+        model.fit([[1], [2], [3]], [0, 4, 5])
+        self.assertEqual(type(model.root), decision_tree.TerminalNode)
+
+    def test_stump_predicts_mean_value(self):
+        model = decision_tree.DecisionStumpRegressor()
+        model.fit([[1], [2], [3]], [0, 4, 5])
+        self.assertEqual(model.predict([0, 1, 2, 3, 4]), [3.0]*5)
+
 if __name__ == '__main__':
     unittest.main()

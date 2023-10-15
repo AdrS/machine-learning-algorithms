@@ -94,6 +94,7 @@ benchmarks = {
     'california-housing': RegressionBenchmark(CaliforniaHousing(), squared_error),
 }
 models = {
+    'DecisionStump': decision_tree.DecisionStumpRegressor,
     'DecisionTree': DecisionTreeRegressor,
     'PrunedDecisionTree': PrunedDecisionTreeRegressor
 }

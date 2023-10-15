@@ -386,3 +386,11 @@ class DecisionTreeRegressor(DecisionTree):
         for x, y in zip(X, Y):
             total_loss += self.loss(root.predict(x), y)
         return total_loss/len(X)
+
+class DecisionStumpClassifier(DecisionTreeClassifier):
+    def __init__(self, impurity=gini_impurity):
+        super().__init__(impurity, max_depth=0)
+
+class DecisionStumpRegressor(DecisionTreeRegressor):
+    def __init__(self, impurity=mean_squared_error_impurity):
+        super().__init__(impurity, max_depth=0)

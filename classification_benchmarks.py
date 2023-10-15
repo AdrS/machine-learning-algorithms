@@ -134,15 +134,7 @@ benchmarks = {
     'amazon-employee-access': ClassificationBenchmark(AmazonEmployeeAccessDataset()),
 }
 models = {
-    'DecisionTreeClassifier': DecisionTreeClassifier,
-}
-
-benchmarks = {
-    'census-income': ClassificationBenchmark(CensusIncomeDataset()),
-    'dont-get-kicked': ClassificationBenchmark(DontGetKickedDataset()),
-    'amazon-employee-access': ClassificationBenchmark(AmazonEmployeeAccessDataset()),
-}
-models = {
+    'DecisionStump': decision_tree.DecisionStumpClassifier,
     'DecisionTree': DecisionTreeClassifier,
     'PrunedDecisionTree': PrunedDecisionTreeClassifier,
 }
