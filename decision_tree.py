@@ -2,55 +2,9 @@ import math
 
 from collections import Counter
 
-class TerminalNode:
-    def __init__(self, Y=[], value=None):
-        if value is not None and Y:
-            raise ValueError('Specify exactly one of Y or value')
-        if value is not None:
-            self.value = value
-        else:
-            # Predict the most common class
-            self.value = Counter(Y).most_common(1)[0][0]
-
-    def predict(self, x):
-        return self.value
-
-    def __repr__(self, indent=None):
-        return 'TerminalNode(value=%r)' % (self.value,)
-
-    def __eq__(self, other):
-        return self.value == other.value
-
-class InteriorNode:
-    def __init__(self, predicate, left, right):
-        self.predicate = predicate
-        self.left = left
-        self.right = right
-
-    def predict(self, x):
-        if self.predicate(x):
-            return self.left.predict(x)
-        else:
-            return self.right.predict(x)
-
-    def __repr__(self, indent=0):
-        return 'InteriorNode(predicate=%r,\n%sleft=%s,\n%sright=%s)' % (
-            self.predicate,
-            ' '*(indent + 2),
-            self.left.__repr__(indent + 2),
-            ' '*(indent + 2),
-            self.right.__repr__(indent + 2))
-
-    def __eq__(self, other):
-        return self.value == other.value
-
-def is_numerical(x):
-    return type(x) == int or type(x) == float
-
-def is_categorical(x):
-    return type(x) == str
-
 def entropy_impurity(counts):
+    if not counts:
+        raise ValueError('Input must be non-empty')
     entropy = 0
     total = sum(counts.values())
     for value_count in counts.values():
@@ -60,7 +14,7 @@ def entropy_impurity(counts):
 
 def gini_impurity(counts):
     if not counts:
-        return 0
+        raise ValueError('Input must be non-empty')
     total = sum(counts.values())
     sum_squares = 0
     for value_count in counts.values():
@@ -69,6 +23,8 @@ def gini_impurity(counts):
     return 1 - sum_squares
 
 def average(X):
+    if not X:
+        raise ValueError('Input must be non-empty')
     return sum(X)/len(X)
 
 def variance(X):
@@ -76,6 +32,8 @@ def variance(X):
     return sum(x*x for x in X)/len(X) - mu*mu
 
 def median(X):
+    if not X:
+        raise ValueError('Input must be non-empty')
     X.sort()
     if len(X) % 2 == 0:
         return (X[len(X)//2] + X[len(X)//2 - 1])/2
@@ -128,6 +86,42 @@ class EqualityPredicate:
         return (type(other) == EqualityPredicate and
             self.feature_index == other.feature_index and
             self.value == other.value)
+
+def is_numerical(x):
+    return type(x) == int or type(x) == float
+
+def is_categorical(x):
+    return type(x) == str
+
+class TerminalNode:
+    def __init__(self, value):
+        self.value = value
+
+    def predict(self, x):
+        return self.value
+
+    def __repr__(self, indent=None):
+        return 'TerminalNode(value=%r)' % (self.value,)
+
+class InteriorNode:
+    def __init__(self, predicate, left, right):
+        self.predicate = predicate
+        self.left = left
+        self.right = right
+
+    def predict(self, x):
+        if self.predicate(x):
+            return self.left.predict(x)
+        else:
+            return self.right.predict(x)
+
+    def __repr__(self, indent=0):
+        return 'InteriorNode(predicate=%r,\n%sleft=%s,\n%sright=%s)' % (
+            self.predicate,
+            ' '*(indent + 2),
+            self.left.__repr__(indent + 2),
+            ' '*(indent + 2),
+            self.right.__repr__(indent + 2))
 
 def fast_propose_threshold_predicate(X, Y, feature_index, impurity):
     Xs, Ys = zip(*sorted(zip([x[feature_index] for x in X], Y)))
@@ -344,7 +338,9 @@ class DecisionTreeClassifier(DecisionTree):
         return True
 
     def create_terminal_node(self, Y):
-        return TerminalNode(Y)
+        # Predict the most common class
+        mode = Counter(Y).most_common(1)[0][0]
+        return TerminalNode(mode)
 
     def score(self, X, Y):
         num_correct = 0
@@ -376,7 +372,7 @@ class DecisionTreeRegressor(DecisionTree):
         return max(Y) - min(Y) < self.purity_tolerance
 
     def create_terminal_node(self, Y):
-        return TerminalNode(value=self.compute_optimal_value(Y))
+        return TerminalNode(self.compute_optimal_value(Y))
 
     def score(self, X, Y):
         #total_loss = 0
