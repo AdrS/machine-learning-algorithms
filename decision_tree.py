@@ -135,21 +135,34 @@ class InteriorNode:
             ' '*(indent + 2),
             self.right.__repr__(indent + 2))
 
-def compute_probability_distribution(X):
+def compute_probability_distribution(X, weights=None):
     '''Returns the probability distribution for the frequency of values in X.
 
     X - list of values
+    weights - non-negative weights to weight elements of X differently
 
     Returns: a map from unique values in X to the probability
     '''
-    P = {}
-    for x in X:
-        if x in P:
-            P[x] += 1
-        else:
-            P[x] = 1
-    for x in P:
-        P[x] /= len(X)
+    if weights:
+        P = {}
+        total = 0
+        for x, w in zip(X, weights):
+            if x in P:
+                P[x] += w
+            else:
+                P[x] = w
+            total += w
+        for x in P:
+            P[x] /= total
+    else:
+        P = {}
+        for x in X:
+            if x in P:
+                P[x] += 1
+            else:
+                P[x] = 1
+        for x in P:
+            P[x] /= len(X)
     return P
 
 def fast_propose_threshold_predicate(X, Y, feature_index, impurity):
@@ -366,10 +379,15 @@ class DecisionTreeClassifier(DecisionTree):
                 return False
         return True
 
-    def create_terminal_node(self, Y):
+    def create_terminal_node(self, Y, weights=None):
+        distribution = compute_probability_distribution(Y, weights)
         # Predict the most common class
-        mode = Counter(Y).most_common(1)[0][0]
-        distribution = compute_probability_distribution(Y)
+        mode = None
+        highest_prob = 0
+        for y, p in distribution.items():
+            if p > highest_prob:
+                mode = y
+                highest_prob = p
         return TerminalNode(mode, distribution)
 
     def predict_prob(self, X):
@@ -423,6 +441,9 @@ class DecisionTreeRegressor(DecisionTree):
 class DecisionStumpClassifier(DecisionTreeClassifier):
     def __init__(self, impurity=gini_impurity):
         super().__init__(impurity, max_depth=0)
+
+    def fit(self, X, Y, weights=None):
+        self.root = self.create_terminal_node(Y, weights)
 
 class DecisionStumpRegressor(DecisionTreeRegressor):
     def __init__(self, impurity=mean_squared_error_impurity):
