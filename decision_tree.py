@@ -94,11 +94,17 @@ def is_categorical(x):
     return type(x) == str
 
 class TerminalNode:
-    def __init__(self, value):
+    def __init__(self, value, distribution=None):
         self.value = value
+        self.distribution = distribution
 
     def predict(self, x):
         return self.value
+
+    def predict_prob(self, x):
+        if not self.distribution:
+            raise TypeError('TerminalNode does not have a distribution')
+        return self.distribution
 
     def __repr__(self, indent=None):
         return 'TerminalNode(value=%r)' % (self.value,)
@@ -115,6 +121,12 @@ class InteriorNode:
         else:
             return self.right.predict(x)
 
+    def predict_prob(self, x):
+        if self.predicate(x):
+            return self.left.predict_prob(x)
+        else:
+            return self.right.predict_prob(x)
+
     def __repr__(self, indent=0):
         return 'InteriorNode(predicate=%r,\n%sleft=%s,\n%sright=%s)' % (
             self.predicate,
@@ -122,6 +134,23 @@ class InteriorNode:
             self.left.__repr__(indent + 2),
             ' '*(indent + 2),
             self.right.__repr__(indent + 2))
+
+def compute_probability_distribution(X):
+    '''Returns the probability distribution for the frequency of values in X.
+
+    X - list of values
+
+    Returns: a map from unique values in X to the probability
+    '''
+    P = {}
+    for x in X:
+        if x in P:
+            P[x] += 1
+        else:
+            P[x] = 1
+    for x in P:
+        P[x] /= len(X)
+    return P
 
 def fast_propose_threshold_predicate(X, Y, feature_index, impurity):
     Xs, Ys = zip(*sorted(zip([x[feature_index] for x in X], Y)))
@@ -340,7 +369,11 @@ class DecisionTreeClassifier(DecisionTree):
     def create_terminal_node(self, Y):
         # Predict the most common class
         mode = Counter(Y).most_common(1)[0][0]
-        return TerminalNode(mode)
+        distribution = compute_probability_distribution(Y)
+        return TerminalNode(mode, distribution)
+
+    def predict_prob(self, X):
+        return [self.root.predict_prob(x) for x in X]
 
     def score(self, X, Y):
         num_correct = 0

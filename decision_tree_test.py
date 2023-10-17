@@ -245,9 +245,20 @@ class IsCategoricalTest(unittest.TestCase):
         self.assertFalse(decision_tree.is_categorical({}))
 
 class TerminalNodeTest(unittest.TestCase):
+
     def test_predicts_provided_value(self):
         node = decision_tree.TerminalNode(2)
         self.assertEqual(node.predict(['a','b','c']), 2)
+
+    def test_predict_prob_return_distribution(self):
+        node = decision_tree.TerminalNode(2, {1:0.1, 2:0.8, 3:0.1})
+        self.assertEqual(node.predict_prob(['a','b','c']),
+            {1:0.1, 2:0.8, 3:0.1})
+
+    def test_predict_prob_raises_error_if_not_distribution(self):
+        node = decision_tree.TerminalNode(2)
+        with self.assertRaisesRegex(TypeError, 'distribution'):
+            node.predict_prob(['a','b','c'])
 
     def test_to_string(self):
         node = decision_tree.TerminalNode(2)
@@ -467,6 +478,19 @@ class DecisionTreeClassifierTest(DecisionTreeTestCase):
             ]),
             [0, 1, 1, 0, 0, 1, 1, 0])
 
+    def test_predict_prob(self):
+        model = decision_tree.DecisionTreeClassifier()
+        model.fit([[1], [1], [1], [2], [2]], [0, 1, 1, 0, 0])
+
+        self.assertEqual(model.predict_prob([
+                [0], [1], [2], [3],
+            ]), [
+                {0:1/3, 1:2/3},
+                {0:1/3, 1:2/3},
+                {0:1},
+                {0:1}
+            ])
+
 class DecisionTreeRegressorTest(DecisionTreeTestCase):
 
     def test_stop_splitting_pure_nodes(self):
@@ -515,6 +539,12 @@ class DecisionStumpClassifierTest(DecisionTreeTestCase):
         model = decision_tree.DecisionStumpClassifier()
         model.fit([[1], [2], [3]], [0, 1, 0])
         self.assertEqual(model.predict([0, 1, 2, 3, 4]), [0]*5)
+
+    def test_stump_predict_prob_returns_probability_distribution(self):
+        model = decision_tree.DecisionStumpClassifier()
+        model.fit([[1], [2], [3], [4]], [0, 1, 0, 2])
+        self.assertEqual(model.predict_prob([0, 1, 2, 3, 4]),
+            [{0:0.5, 1:0.25, 2:0.25}]*5)
 
 class DecisionStumpRegressorTest(DecisionTreeTestCase):
 
