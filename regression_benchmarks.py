@@ -1,6 +1,7 @@
 import decision_tree
 
 from benchmark import Benchmark, CsvDataset, Field, run_benchmarks, main
+from loss import MeanSquaredError
 from sklearn.model_selection import train_test_split
 
 class BostonHousing(CsvDataset):
@@ -39,6 +40,7 @@ class CaliforniaHousing(CsvDataset):
         target_field=Field('medianHouseValue', 8, float),
         skip_header=False)
 
+# TODO: refactor to use loss module
 def squared_error(y, y_pred):
     return (y - y_pred)**2
 
@@ -60,10 +62,7 @@ class RegressionBenchmark(Benchmark):
         # TODO: print correlation between features
 
     def evaluate_predictions(self, Y_target, Y_pred):
-        total_loss = 0
-        for y_target, y_pred in zip(Y_target, Y_pred):
-            total_loss += self.loss_fn(y_target, y_pred)
-        return {'loss':total_loss/len(Y_target)}
+        return {'loss':self.loss_fn(Y_pred, Y_target)}
 
     def show_evaluation(self, evaluation_results):
         print('Loss:', evaluation_results['loss'])
@@ -89,9 +88,12 @@ class PrunedDecisionTreeRegressor(DecisionTreeRegressor):
         self.model.fit(X_train, Y_train)
         self.model.prune(X_val, Y_val)
 
+# TODO: add flag to control loss function
 benchmarks = {
-    'boston-housing': RegressionBenchmark(BostonHousing(), squared_error),
-    'california-housing': RegressionBenchmark(CaliforniaHousing(), squared_error),
+    'boston-housing': RegressionBenchmark(
+        BostonHousing(), MeanSquaredError()),
+    'california-housing': RegressionBenchmark(
+        CaliforniaHousing(), MeanSquaredError()),
 }
 models = {
     'DecisionStump': decision_tree.DecisionStumpRegressor,

@@ -1,6 +1,8 @@
 import math
 
 from collections import Counter
+from loss import MeanSquaredError
+from statistics import average, variance, median
 
 def entropy_impurity(counts):
     if not counts:
@@ -21,35 +23,6 @@ def gini_impurity(counts):
         p = value_count/total
         sum_squares += p*p
     return 1 - sum_squares
-
-def average(X):
-    if not X:
-        raise ValueError('Input must be non-empty')
-    return sum(X)/len(X)
-
-def variance(X):
-    mu = average(X)
-    return sum(x*x for x in X)/len(X) - mu*mu
-
-def median(X):
-    if not X:
-        raise ValueError('Input must be non-empty')
-    X.sort()
-    if len(X) % 2 == 0:
-        return (X[len(X)//2] + X[len(X)//2 - 1])/2
-    else:
-        return X[len(X)//2]
-
-def mean_squared_error_impurity(Y):
-    if not Y:
-        return 0
-    return variance(Y)
-
-def mean_absolute_error_impurity(Y):
-    if not Y:
-        return 0
-    m = median(Y)
-    return sum(abs(y - m) for y in Y)/len(Y)
 
 # TODO: log loss impurity
 
@@ -299,7 +272,7 @@ class DecisionTree:
     def score(self, X, Y):
         raise NotImplementedError
 
-    def _loss(self, root, X, Y):
+    def tree_loss(self, root, X, Y):
         raise NotImplementedError
 
     def cost_complexity_prune(self, alpha):
@@ -320,7 +293,7 @@ class DecisionTree:
             self.branch_pruning_info.values()])
         for alpha in alphas:
             tree = self.cost_complexity_prune(alpha)
-            loss = self._loss(tree, X_validation, Y_validation)
+            loss = self.tree_loss(tree, X_validation, Y_validation)
             if loss <= best_loss:
                 best_loss = loss
                 best_tree = tree
@@ -365,6 +338,7 @@ class DecisionTree:
 
 class DecisionTreeClassifier(DecisionTree):
     def __init__(self, impurity=gini_impurity, max_depth=99999):
+        # TODO: accept classification loss functions
         def wrapped_impurity(Y):
             # TODO: see if there is a good way to avoid this
             if type(Y) == Counter:
@@ -399,22 +373,25 @@ class DecisionTreeClassifier(DecisionTree):
             num_correct += (prediction == target)
         return num_correct/len(X)
 
-    def _loss(self, root, X, Y):
+    def tree_loss(self, root, X, Y):
         num_correct = sum(int(root.predict(x) == y) for x, y in zip(X, Y))
         return -num_correct/len(X)
 
+def get_regression_impurity_fn(loss_fn):
+    'Creates a regression impurity function from a regression loss function.'
+    def impurity(Y):
+        if len(Y) == 0:
+            return 0
+        prior = loss_fn.prior(Y)
+        return loss_fn.loss(Y, [prior]*len(Y))
+    return impurity
+
 class DecisionTreeRegressor(DecisionTree):
-    def __init__(self, impurity=mean_squared_error_impurity, max_depth=99999,
+    def __init__(self, loss=MeanSquaredError(), max_depth=99999,
             purity_tolerance=1e-4):
+        impurity = get_regression_impurity_fn(loss)
         super().__init__(impurity, max_depth)
-        self.compute_optimal_value = {
-            mean_squared_error_impurity:average,
-            mean_absolute_error_impurity:median
-        }[impurity]
-        self.loss = {
-            mean_squared_error_impurity:(lambda y_pred, y: (y - y_pred)**2),
-            mean_absolute_error_impurity:(lambda y_pred, y: abs(y - y_pred))
-        }[impurity]
+        self.loss = loss
         self.purity_tolerance = purity_tolerance
 
     def is_pure(self, Y):
@@ -423,20 +400,13 @@ class DecisionTreeRegressor(DecisionTree):
         return max(Y) - min(Y) < self.purity_tolerance
 
     def create_terminal_node(self, Y):
-        return TerminalNode(self.compute_optimal_value(Y))
+        return TerminalNode(self.loss.prior(Y))
 
     def score(self, X, Y):
-        #total_loss = 0
-        #for prediction, target in zip(self.predict(X), Y):
-        #    total_loss += self.loss(prediction, target)
-        #return total_loss/len(X)
-        return self._loss(self.root, X, Y)
+        return self.tree_loss(self.root, X, Y)
 
-    def _loss(self, root, X, Y):
-        total_loss = 0
-        for x, y in zip(X, Y):
-            total_loss += self.loss(root.predict(x), y)
-        return total_loss/len(X)
+    def tree_loss(self, root, X, Y):
+        return self.loss(Y, [root.predict(x) for x in X])
 
 class DecisionStumpClassifier(DecisionTreeClassifier):
     def __init__(self, impurity=gini_impurity):
@@ -446,5 +416,5 @@ class DecisionStumpClassifier(DecisionTreeClassifier):
         self.root = self.create_terminal_node(Y, weights)
 
 class DecisionStumpRegressor(DecisionTreeRegressor):
-    def __init__(self, impurity=mean_squared_error_impurity):
-        super().__init__(impurity, max_depth=0)
+    def __init__(self, loss=MeanSquaredError()):
+        super().__init__(loss, max_depth=0)

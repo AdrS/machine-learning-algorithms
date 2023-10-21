@@ -1,7 +1,9 @@
 import unittest
 import decision_tree
 import math
+
 from collections import Counter
+from loss import MeanAbsoluteError, MeanSquaredError
 
 class EntropyImpurityTest(unittest.TestCase):
 
@@ -42,84 +44,56 @@ class GiniImpurityTest(unittest.TestCase):
         self.assertAlmostEqual(
             decision_tree.gini_impurity(Counter([1,1,1,1,1,1])), 0)
 
-class AverageTest(unittest.TestCase):
+class RegressionImpurityTest(unittest.TestCase):
 
-    def test_should_raise_error_for_empty_set(self):
-        with self.assertRaisesRegex(ValueError, 'empty'):
-            decision_tree.average([])
+    def __init__(self, loss, *args, **kwargs):
 
-    def test_should_compute_average(self):
-        self.assertAlmostEqual(decision_tree.average([1, 1, 10]), 4)
+        super().__init__(*args, **kwargs)
+        self.impurity = decision_tree.get_regression_impurity_fn(loss)
 
-class VarianceTest(unittest.TestCase):
+class MeanSquaredErrorImpurityTest(RegressionImpurityTest):
 
-    def test_should_raise_error_for_empty_set(self):
-        with self.assertRaisesRegex(ValueError, 'empty'):
-            decision_tree.variance([])
+    def __init__(self, *args, **kwargs):
+        super().__init__(MeanSquaredError(), *args, **kwargs)
 
-    def test_should_compute_variance(self):
-        self.assertAlmostEqual(decision_tree.variance([1, 1, 10]), 18)
-
-class MedianTest(unittest.TestCase):
-
-    def test_should_raise_error_for_empty_set(self):
-        with self.assertRaisesRegex(ValueError, 'empty'):
-            decision_tree.median([])
-
-    def test_return_middle_for_odd_number_of_elements(self):
-        self.assertAlmostEqual(decision_tree.median([2, 4, 10]), 4)
-
-    def test_return_midpoint_for_even_number_of_elements(self):
-        self.assertAlmostEqual(decision_tree.median([2, 4, 9, 10]), 6.5)
-
-    def test_computes_median_of_unsorted_elements(self):
-        self.assertAlmostEqual(decision_tree.median([4, 3, 1, 2, 5]), 3)
-
-class MeanSquaredErrorImpurityTest(unittest.TestCase):
     def test_empy_set_has_0_impurity(self):
-        self.assertAlmostEqual(
-            decision_tree.mean_squared_error_impurity([]), 0)
+        self.assertAlmostEqual(self.impurity([]), 0)
 
     def test_uniform_distribution(self):
-        self.assertAlmostEqual(
-            decision_tree.mean_squared_error_impurity([1,1,2,2]), 0.25)
+        self.assertAlmostEqual(self.impurity([1,1,2,2]), 0.25)
 
     def test_unequal_distribution(self):
-        self.assertAlmostEqual(
-            decision_tree.mean_squared_error_impurity([1,2,2, 3,3,3]),
+        self.assertAlmostEqual(self.impurity([1,2,2, 3,3,3]),
             ((1 - 14/6)**2 + 2*(2 - 14/6)**2 + 3*(3 - 14/6)**2)/6)
 
     def test_point_distribution_has_0_impurity(self):
-        self.assertAlmostEqual(
-            decision_tree.mean_squared_error_impurity([1,1,1,1,1,1]),
-            0)
+        self.assertAlmostEqual(self.impurity([1,1,1,1,1,1]), 0)
 
-class MeanAbsoluteErrorImpurityTest(unittest.TestCase):
+class MeanAbsoluteErrorImpurityTest(RegressionImpurityTest):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(MeanAbsoluteError(), *args, **kwargs)
+
     def test_empy_set_has_0_impurity(self):
-        self.assertAlmostEqual(
-            decision_tree.mean_absolute_error_impurity([]), 0)
+        self.assertAlmostEqual(self.impurity([]), 0)
 
     def test_uniform_distribution(self):
-        self.assertAlmostEqual(
-            decision_tree.mean_absolute_error_impurity([1,2,3,4]),
+        self.assertAlmostEqual(self.impurity([1,2,3,4]),
             (1.5 + 0.5 + 0.5 + 1.5)/4)
 
     def test_odd_length(self):
-        self.assertAlmostEqual(
-            decision_tree.mean_absolute_error_impurity([1,2,3]), (1 + 0 + 1)/3)
+        self.assertAlmostEqual(self.impurity([1,2,3]), (1 + 0 + 1)/3)
 
     def test_even_length(self):
-        self.assertAlmostEqual(
-            decision_tree.mean_absolute_error_impurity([0, 0, 2, 2]), 1)
+        self.assertAlmostEqual(self.impurity([0, 0, 2, 2]), 1)
 
     def test_unequal_distribution(self):
         self.assertAlmostEqual(
-            decision_tree.mean_absolute_error_impurity([1,2,2, 3,3,3]),
+            self.impurity([1,2,2, 3,3,3]),
             ((14/6 - 1) + 2*(14/6 - 2) + 3*(3 - 14/6))/6)
 
     def test_point_distribution_has_0_impurity(self):
-        self.assertAlmostEqual(
-            decision_tree.mean_absolute_error_impurity([1,1,1,1,1,1]), 0)
+        self.assertAlmostEqual(self.impurity([1,1,1,1,1,1]), 0)
 
 class ThresholdPredicateTest(unittest.TestCase):
 

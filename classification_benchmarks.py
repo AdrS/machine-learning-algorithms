@@ -1,6 +1,5 @@
 import argparse
 import decision_tree
-import adaboost
 
 from benchmark import Benchmark, CsvDataset, Field, run_benchmarks, main
 from collections import Counter
@@ -129,10 +128,6 @@ class PrunedDecisionTreeClassifier(DecisionTreeClassifier):
         self.model.fit(X_train, Y_train)
         self.model.prune(X_val, Y_val)
 
-class AdaBoostClassifier(adaboost.AdaBoostClassifier):
-    def __init__(self):
-        super().__init__(decision_tree.DecisionStumpClassifier, num_models=3)
-
 benchmarks = {
     'census-income': ClassificationBenchmark(CensusIncomeDataset()),
     'dont-get-kicked': ClassificationBenchmark(DontGetKickedDataset()),
@@ -142,7 +137,6 @@ models = {
     'DecisionStump': decision_tree.DecisionStumpClassifier,
     'DecisionTree': DecisionTreeClassifier,
     'PrunedDecisionTree': PrunedDecisionTreeClassifier,
-    'AdaBoost':AdaBoostClassifier,
 }
 
 if __name__ == '__main__':
