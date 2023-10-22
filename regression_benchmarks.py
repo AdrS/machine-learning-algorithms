@@ -1,6 +1,7 @@
 import decision_tree
 
 from benchmark import Benchmark, CsvDataset, Field, run_benchmarks, main
+from gradient_boost import GradientBoostRegressor
 from loss import MeanSquaredError
 from sklearn.model_selection import train_test_split
 
@@ -69,10 +70,8 @@ class RegressionBenchmark(Benchmark):
 
 class DecisionTreeRegressor:
 
-    def __init__(self):
-        self.max_depth=999999
-        self.model = decision_tree.DecisionTreeRegressor(
-            max_depth=self.max_depth)
+    def __init__(self, *args, **kwargs):
+        self.model = decision_tree.DecisionTreeRegressor(*args, **kwargs)
 
     def fit(self, X, Y):
         self.model.fit(X, Y)
@@ -88,6 +87,22 @@ class PrunedDecisionTreeRegressor(DecisionTreeRegressor):
         self.model.fit(X_train, Y_train)
         self.model.prune(X_val, Y_val)
 
+class GBDT:
+
+    def __init__(self):
+        self.model = GradientBoostRegressor(
+            create_base_model=lambda *args, **kwargs: PrunedDecisionTreeRegressor(*args, **kwargs),
+            loss_fn=MeanSquaredError(),
+            num_models=50,
+            sample_fraction=None)
+
+    def fit(self, X, Y):
+        self.model.fit(X, Y)
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+
 # TODO: add flag to control loss function
 benchmarks = {
     'boston-housing': RegressionBenchmark(
@@ -98,7 +113,8 @@ benchmarks = {
 models = {
     'DecisionStump': decision_tree.DecisionStumpRegressor,
     'DecisionTree': DecisionTreeRegressor,
-    'PrunedDecisionTree': PrunedDecisionTreeRegressor
+    'PrunedDecisionTree': PrunedDecisionTreeRegressor,
+    'GBDT': GBDT,
 }
 
 if __name__ == '__main__':

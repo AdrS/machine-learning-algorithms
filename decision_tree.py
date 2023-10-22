@@ -387,11 +387,11 @@ def get_regression_impurity_fn(loss_fn):
     return impurity
 
 class DecisionTreeRegressor(DecisionTree):
-    def __init__(self, loss=MeanSquaredError(), max_depth=99999,
+    def __init__(self, loss_fn=MeanSquaredError(), max_depth=99999,
             purity_tolerance=1e-4):
-        impurity = get_regression_impurity_fn(loss)
+        impurity = get_regression_impurity_fn(loss_fn)
         super().__init__(impurity, max_depth)
-        self.loss = loss
+        self.loss = loss_fn
         self.purity_tolerance = purity_tolerance
 
     def is_pure(self, Y):
@@ -416,5 +416,5 @@ class DecisionStumpClassifier(DecisionTreeClassifier):
         self.root = self.create_terminal_node(Y, weights)
 
 class DecisionStumpRegressor(DecisionTreeRegressor):
-    def __init__(self, loss=MeanSquaredError()):
-        super().__init__(loss, max_depth=0)
+    def __init__(self, loss_fn=MeanSquaredError()):
+        super().__init__(loss_fn, max_depth=0)
