@@ -504,44 +504,21 @@ class DecisionTreeRegressorTest(DecisionTreeTestCase):
 
 class DecisionStumpClassifierTest(DecisionTreeTestCase):
 
-    def test_stump_has_single_node(self):
+    def test_stump_has_single_split(self):
         model = decision_tree.DecisionStumpClassifier()
         model.fit([[1], [2], [3]], [0, 1, 0])
-        self.assertEqual(type(model.root), decision_tree.TerminalNode)
-
-    def test_stump_predicts_most_common_class(self):
-        model = decision_tree.DecisionStumpClassifier()
-        model.fit([[1], [2], [3]], [0, 1, 0])
-        self.assertEqual(model.predict([0, 1, 2, 3, 4]), [0]*5)
-
-    def test_weighted_stump_predicts_highest_weighted_class(self):
-        model = decision_tree.DecisionStumpClassifier()
-        model.fit([[1], [2], [3]], [0, 1, 0], weights=[1, 5, 3])
-        self.assertEqual(model.predict([0, 1, 2, 3, 4]), [1]*5)
-
-    def test_stump_predict_prob_returns_probability_distribution(self):
-        model = decision_tree.DecisionStumpClassifier()
-        model.fit([[1], [2], [3], [4]], [0, 1, 0, 2])
-        self.assertEqual(model.predict_prob([0, 1, 2, 3, 4]),
-            [{0:0.5, 1:0.25, 2:0.25}]*5)
-
-    def test_weighted_stump_predict_prob_returns_distribution(self):
-        model = decision_tree.DecisionStumpClassifier()
-        model.fit([[1], [2], [3]], [0, 1, 0], weights=[1, 6, 3])
-        self.assertEqual(model.predict_prob([0, 1, 2, 3, 4]),
-            [{0:0.4, 1:0.6}]*5)
+        self.assertEqual(type(model.root), decision_tree.InteriorNode)
+        self.assertEqual(type(model.root.left), decision_tree.TerminalNode)
+        self.assertEqual(type(model.root.right), decision_tree.TerminalNode)
 
 class DecisionStumpRegressorTest(DecisionTreeTestCase):
 
-    def test_stump_has_single_node(self):
+    def test_stump_has_single_split(self):
         model = decision_tree.DecisionStumpRegressor()
         model.fit([[1], [2], [3]], [0, 4, 5])
-        self.assertEqual(type(model.root), decision_tree.TerminalNode)
-
-    def test_stump_predicts_mean_value(self):
-        model = decision_tree.DecisionStumpRegressor()
-        model.fit([[1], [2], [3]], [0, 4, 5])
-        self.assertEqual(model.predict([0, 1, 2, 3, 4]), [3.0]*5)
+        self.assertEqual(type(model.root), decision_tree.InteriorNode)
+        self.assertEqual(type(model.root.left), decision_tree.TerminalNode)
+        self.assertEqual(type(model.root.right), decision_tree.TerminalNode)
 
 if __name__ == '__main__':
     unittest.main()

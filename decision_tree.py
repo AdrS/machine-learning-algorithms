@@ -410,11 +410,8 @@ class DecisionTreeRegressor(DecisionTree):
 
 class DecisionStumpClassifier(DecisionTreeClassifier):
     def __init__(self, impurity=gini_impurity):
-        super().__init__(impurity, max_depth=0)
-
-    def fit(self, X, Y, weights=None):
-        self.root = self.create_terminal_node(Y, weights)
+        super().__init__(impurity, max_depth=1)
 
 class DecisionStumpRegressor(DecisionTreeRegressor):
     def __init__(self, loss_fn=MeanSquaredError()):
-        super().__init__(loss_fn, max_depth=0)
+        super().__init__(loss_fn, max_depth=1)
