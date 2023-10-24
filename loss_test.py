@@ -8,12 +8,26 @@ class MeanSquaredErrorTest(unittest.TestCase):
         loss = MeanSquaredError()
         self.assertAlmostEqual(loss.prior([1, 4, 7]), 4)
 
+    def test_should_use_weighted_average_as_prior(self):
+        loss = MeanSquaredError()
+        self.assertAlmostEqual(loss.prior([1, 4, 7], [4, 1, 2]),
+            (4*1 + 1*4 + 2*7)/(4 + 1 + 2))
+
     def test_loss(self):
         loss = MeanSquaredError()
         targets = [1, 4, 7]
         predictions = [1, 3, 10]
         expected = (0 + 1**2 + 3**2)/3
         self.assertAlmostEqual(loss.loss(targets, predictions), expected)
+
+    def test_weighted_loss(self):
+        loss = MeanSquaredError()
+        targets = [1, 4, 7]
+        predictions = [1, 3, 10]
+        weights = [4, 1, 2]
+        expected = (4*0 + 1**2 + 2*3**2)/(4 + 1 + 2)
+        self.assertAlmostEqual(
+            loss.loss(targets, predictions, weights), expected)
 
     def test_gradients(self):
         loss = MeanSquaredError()
@@ -31,12 +45,26 @@ class MeanAbsoluteErrorTest(unittest.TestCase):
         loss = MeanAbsoluteError()
         self.assertAlmostEqual(loss.prior([1, 3, 4, 7, 100]), 4)
 
+    def test_should_use_weighted_media_as_prior(self):
+        loss = MeanAbsoluteError()
+        self.assertAlmostEqual(
+            loss.prior([1, 3, 4, 7], [2, 2, 1, 1]), 3)
+
     def test_loss(self):
         loss = MeanAbsoluteError()
         targets = [1, 4, 7]
         predictions = [1, 3, 10]
         expected = (0 + 1 + 3)/3
         self.assertAlmostEqual(loss.loss(targets, predictions), expected)
+
+    def test_weighted_loss(self):
+        loss = MeanAbsoluteError()
+        targets = [1, 4, 7]
+        predictions = [1, 3, 10]
+        weights = [4, 1, 2]
+        expected = (4*0 + 1*1 + 2*3)/(4 + 1 + 2)
+        self.assertAlmostEqual(
+            loss.loss(targets, predictions, weights), expected)
 
     def test_gradients(self):
         loss = MeanAbsoluteError()
@@ -55,6 +83,11 @@ class HuberLossFnTest(unittest.TestCase):
         loss = HuberLossFn()
         self.assertAlmostEqual(loss.prior([1, 3, 4, 7, 100]), 4)
 
+    def test_should_use_weighted_media_as_prior(self):
+        loss = HuberLossFn()
+        self.assertAlmostEqual(
+            loss.prior([1, 3, 4, 7], [2, 2, 1, 1]), 3)
+
     def test_loss_zero(self):
         loss = HuberLossFn(delta=1)
         self.assertAlmostEqual(loss.loss([1], [1]), 0)
@@ -71,6 +104,12 @@ class HuberLossFnTest(unittest.TestCase):
     def test_loss_greater_than_delta(self):
         loss = HuberLossFn(delta=2)
         self.assertAlmostEqual(loss.loss([1], [6]), 2*(5 - 0.5*2))
+
+    def test_weighted_loss(self):
+        loss = HuberLossFn(delta=2)
+        self.assertAlmostEqual(
+            loss.loss([1, 3], [1.6, 4], [5, 7]),
+            (5*0.5*0.6*0.6 + 7*0.5*1*1)/(5 + 7))
 
     def test_gradients(self):
         loss = HuberLossFn(delta=1)
