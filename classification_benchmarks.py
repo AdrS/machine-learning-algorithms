@@ -1,6 +1,7 @@
 import argparse
 import decision_tree
 
+from adaboost import AdaBoostClassifier
 from benchmark import Benchmark, CsvDataset, Field, run_benchmarks, main
 from collections import Counter
 from sklearn.model_selection import train_test_split
@@ -128,6 +129,15 @@ class PrunedDecisionTreeClassifier(DecisionTreeClassifier):
         self.model.fit(X_train, Y_train)
         self.model.prune(X_val, Y_val)
 
+class AdaBoostStumpClassifier(AdaBoostClassifier):
+    def __init__(self):
+        super().__init__(decision_tree.DecisionStumpClassifier, num_models=4)
+
+class AdaBoostTreeClassifier(AdaBoostClassifier):
+    def __init__(self):
+        super().__init__(decision_tree.DecisionTreeClassifier, num_models=4)
+
+
 benchmarks = {
     'census-income': ClassificationBenchmark(CensusIncomeDataset()),
     'dont-get-kicked': ClassificationBenchmark(DontGetKickedDataset()),
@@ -137,6 +147,8 @@ models = {
     'DecisionStump': decision_tree.DecisionStumpClassifier,
     'DecisionTree': DecisionTreeClassifier,
     'PrunedDecisionTree': PrunedDecisionTreeClassifier,
+    'AdaBoostStump':AdaBoostStumpClassifier,
+    'AdaBoostTree':AdaBoostTreeClassifier,
 }
 
 if __name__ == '__main__':

@@ -4,23 +4,21 @@ from collections import Counter
 from loss import MeanSquaredError
 from statistics import average, variance, median
 
-def entropy_impurity(counts):
-    if not counts:
-        raise ValueError('Input must be non-empty')
+# TODO: rename to distribution_entroy
+def entropy_impurity(distribution):
+    if not distribution:
+        raise ValueError('Distribution must be non-empty')
     entropy = 0
-    total = sum(counts.values())
-    for value_count in counts.values():
-        p = value_count/total
+    for p in distribution.values():
         entropy -= p*math.log(p)
     return entropy
 
-def gini_impurity(counts):
-    if not counts:
+# TODO: rename to distribution_gini
+def gini_impurity(distribution):
+    if not distribution:
         raise ValueError('Input must be non-empty')
-    total = sum(counts.values())
     sum_squares = 0
-    for value_count in counts.values():
-        p = value_count/total
+    for p in distribution.values():
         sum_squares += p*p
     return 1 - sum_squares
 
@@ -138,6 +136,14 @@ def compute_probability_distribution(X, weights=None):
             P[x] /= len(X)
     return P
 
+def counts_to_probability_distribution(counts):
+    P = {}
+    total = sum(counts.values())
+    for v, c in counts.items():
+        P[v] = c/total
+    return P
+
+# TODO(weights): support weights
 def fast_propose_threshold_predicate(X, Y, feature_index, impurity):
     Xs, Ys = zip(*sorted(zip([x[feature_index] for x in X], Y)))
     left_counts = Counter()
@@ -157,6 +163,7 @@ def fast_propose_threshold_predicate(X, Y, feature_index, impurity):
             break
         assert(sum(left_counts.values()) == i)
         assert(sum(right_counts.values()) == (len(X) - i))
+        # TODO(weights): derive distribution from weights
         score = (impurity(left_counts)*i + impurity(right_counts)*(len(X) - i))
         if score < best_score:
             best_score = score
@@ -188,20 +195,38 @@ def propose_split_predicates(X, Y, impurity, slow=False):
         else:
             raise TypeError('Feature must be numerical or categorical')
 
-def partition(X, Y, split_predicate):
-    X_left, Y_left, X_right, Y_right = [], [], [], []
-    for x, y in zip(X, Y):
-        if split_predicate(x):
-            X_left.append(x)
-            Y_left.append(y)
-        else:
-            X_right.append(x)
-            Y_right.append(y)
-    return X_left, Y_left, X_right, Y_right
+def partition(split_predicate, X, Y, weights=None):
+    if weights:
+        X_left, Y_left, X_right, Y_right, W_left, W_right = (
+            [], [], [], [], [], [])
+        for x, y, w in zip(X, Y, weights):
+            if split_predicate(x):
+                X_left.append(x)
+                Y_left.append(y)
+                W_left.append(w)
+            else:
+                X_right.append(x)
+                Y_right.append(y)
+                W_right.append(w)
+        return X_left, Y_left, X_right, Y_right, W_left, W_right 
+    else:
+        X_left, Y_left, X_right, Y_right = [], [], [], []
+        for x, y in zip(X, Y):
+            if split_predicate(x):
+                X_left.append(x)
+                Y_left.append(y)
+            else:
+                X_right.append(x)
+                Y_right.append(y)
+        return X_left, Y_left, X_right, Y_right, None, None
 
-def score_split(Y_left, Y_right, impurity):
+def score_split(Y_left, Y_right, W_left, W_right, impurity):
     # IG = I(Y) - p_left*I(Y_left) - p_right*I(Y_right)
-    return impurity(Y_left)*len(Y_left) + impurity(Y_right)*len(Y_right)
+    p_left = len(Y_left) if W_left is None else sum(W_left)
+    p_right = len(Y_right) if W_right is None else sum(W_right)
+    lhs = p_left*impurity(Y_left, W_left)*p_left
+    rhs = p_right*impurity(Y_right, W_right)*p_right
+    return lhs + rhs
 
 class DecisionTree:
     def __init__(self, impurity, max_depth):
@@ -214,10 +239,10 @@ class DecisionTree:
     def is_pure(self, Y):
         raise NotImplementedError
 
-    def create_terminal_node(self, Y):
+    def create_terminal_node(self, Y, weights=None):
         raise NotImplementedError
 
-    def construct_decision_tree(self, X, Y, num_examples, depth):
+    def construct_decision_tree(self, X, Y, weights, num_examples, depth):
         '''Constructs a decision tree from training data X, Y
 
         Returns:
@@ -225,22 +250,26 @@ class DecisionTree:
             size - number of nodes in the tree
             cost - sum over leaf t of p(t)*impurity(t)
         '''
-        node_cost = len(Y)/num_examples*self.impurity(Y)
-        terminal_node = self.create_terminal_node(Y)
+        node_cost = len(Y)/num_examples*self.impurity(Y, weights)
+        terminal_node = self.create_terminal_node(Y, weights)
         if self.is_pure(Y) or depth >= self.max_depth:
             return terminal_node, 1, node_cost
 
         best_score = float('inf')
         best_split = None
-        for split_predicate in propose_split_predicates(X, Y, self.impurity):
-            X_left, Y_left, X_right, Y_right = partition(X, Y, split_predicate)
+        for split_predicate in propose_split_predicates(X, Y, self.impurity,
+                slow=(weights is not None)):
+                # TODO(weights): support fast with weights
+            X_left, Y_left, X_right, Y_right, W_left, W_right = partition(
+                split_predicate, X, Y, weights)
             if not X_left or not X_right:
                 continue
-            score = score_split(Y_left, Y_right, self.impurity)
+            score = score_split(Y_left, Y_right, W_left, W_right, self.impurity)
 
             if score < best_score:
                 best_score = score
-                best_split = (split_predicate, X_left, Y_left, X_right, Y_right)
+                best_split = (split_predicate, X_left, Y_left, X_right,
+                    Y_right, W_left, W_right)
 
         if not best_split:
             # TODO: test additional stopping criteria
@@ -249,11 +278,11 @@ class DecisionTree:
             # TODO: best first search for to support max leaf nodes
             return terminal_node, 1, node_cost
 
-        split_predicate, X_left, Y_left, X_right, Y_right = best_split
+        split_predicate, X_left, Y_left, X_right, Y_right, W_left, W_right = best_split
         left_branch, left_size, left_cost = self.construct_decision_tree(
-            X_left, Y_left, num_examples, depth + 1)
+            X_left, Y_left, W_left, num_examples, depth + 1)
         right_branch, right_size, right_cost = self.construct_decision_tree(
-            X_right, Y_right, num_examples, depth + 1)
+            X_right, Y_right, W_right, num_examples, depth + 1)
         branch_size = left_size + right_size + 1
         branch_cost = left_cost + right_cost
         branch = InteriorNode(split_predicate, left_branch, right_branch)
@@ -261,10 +290,10 @@ class DecisionTree:
         self.branch_pruning_info[id(branch)] = (alpha, terminal_node)
         return branch, branch_size, branch_cost
 
-    def fit(self, X, Y):
+    def fit(self, X, Y, weights=None):
         self.branch_pruning_info = {}
         self.root, _, _ = self.construct_decision_tree(
-                X, Y, num_examples=len(Y), depth=0)
+                X, Y, weights, num_examples=len(Y), depth=0)
 
     def predict(self, X):
         return [self.root.predict(x) for x in X]
@@ -339,12 +368,14 @@ class DecisionTree:
 class DecisionTreeClassifier(DecisionTree):
     def __init__(self, impurity=gini_impurity, max_depth=99999):
         # TODO: accept classification loss functions
-        def wrapped_impurity(Y):
+        def wrapped_impurity(P, weights=None):
             # TODO: see if there is a good way to avoid this
-            if type(Y) == Counter:
-                return impurity(Y)
+            if type(P) == Counter:
+                return impurity(counts_to_probability_distribution(P))
+            elif type(P) == list:
+                return impurity(compute_probability_distribution(P, weights))
             else:
-                return impurity(Counter(Y))
+                return impurity(P)
         super().__init__(wrapped_impurity, max_depth)
 
     def is_pure(self, Y):
@@ -379,11 +410,11 @@ class DecisionTreeClassifier(DecisionTree):
 
 def get_regression_impurity_fn(loss_fn):
     'Creates a regression impurity function from a regression loss function.'
-    def impurity(Y):
+    def impurity(Y, weights=None):
         if len(Y) == 0:
             return 0
-        prior = loss_fn.prior(Y)
-        return loss_fn.loss(Y, [prior]*len(Y))
+        prior = loss_fn.prior(Y, weights)
+        return loss_fn.loss(Y, [prior]*len(Y), weights)
     return impurity
 
 class DecisionTreeRegressor(DecisionTree):
@@ -399,8 +430,8 @@ class DecisionTreeRegressor(DecisionTree):
             return True
         return max(Y) - min(Y) < self.purity_tolerance
 
-    def create_terminal_node(self, Y):
-        return TerminalNode(self.loss.prior(Y))
+    def create_terminal_node(self, Y, weights=None):
+        return TerminalNode(self.loss.prior(Y, weights))
 
     def score(self, X, Y):
         return self.tree_loss(self.root, X, Y)

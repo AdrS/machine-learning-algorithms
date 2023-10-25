@@ -2,47 +2,47 @@ import unittest
 import decision_tree
 import math
 
-from collections import Counter
+from decision_tree import partition
 from loss import MeanAbsoluteError, MeanSquaredError
 
 class EntropyImpurityTest(unittest.TestCase):
 
-    def test_raises_error_for_empy_set(self):
+    def test_raises_error_for_empy_distribution(self):
         with self.assertRaisesRegex(ValueError, 'empty'):
-            decision_tree.entropy_impurity([])
+            decision_tree.entropy_impurity({})
 
     def test_uniform_distribution_has_high_impurity(self):
         self.assertAlmostEqual(
-            decision_tree.entropy_impurity(Counter([1,1,2,2])),
+            decision_tree.entropy_impurity({1:0.5, 2:0.5}),
             -math.log(0.5))
 
     def test_unequal_distribution(self):
         self.assertAlmostEqual(
-            decision_tree.entropy_impurity(Counter([1,2,2, 3,3,3])),
+            decision_tree.entropy_impurity({1:1/6, 2:1/3, 3:1/2}),
             -math.log(1/6)/6 - math.log(1/3)/3 - math.log(0.5)/2)
 
     def test_point_distribution_has_0_impurity(self):
         self.assertAlmostEqual(
-            decision_tree.entropy_impurity(Counter([1,1,1,1,1,1])), 0)
+            decision_tree.entropy_impurity({1:1}), 0)
 
 class GiniImpurityTest(unittest.TestCase):
 
     def test_raises_error_for_empy_set(self):
         with self.assertRaisesRegex(ValueError, 'empty'):
-            decision_tree.gini_impurity(Counter([]))
+            decision_tree.gini_impurity({})
 
     def test_uniform_distribution_has_high_impurity(self):
         self.assertAlmostEqual(
-            decision_tree.gini_impurity(Counter([1,1,2,2])), 0.5)
+            decision_tree.gini_impurity({1:0.5, 2:0.5}), 0.5)
 
     def test_unequal_distribution(self):
         self.assertAlmostEqual(
-            decision_tree.gini_impurity(Counter([1,2,2, 3,3,3])),
+            decision_tree.gini_impurity({1:1/6, 2:1/3, 3:1/2}),
             1 - (1/6)**2 - (1/3)**2 - (1/2)**2)
 
     def test_point_distribution_has_0_impurity(self):
         self.assertAlmostEqual(
-            decision_tree.gini_impurity(Counter([1,1,1,1,1,1])), 0)
+            decision_tree.gini_impurity({1:1}), 0)
 
 class RegressionImpurityTest(unittest.TestCase):
 
@@ -379,18 +379,37 @@ class ProposeSplitPartitionsTest(unittest.TestCase):
 
 class PartitionTest(unittest.TestCase):
 
-    def test(self):
+    def test_partition_without_weights(self):
         X = [[4], [3], [1], [2]]
         Y = [[0], [1], [1], [0]]
+        W = None
         predicate = decision_tree.ThresholdPredicate(
             feature_index=0, threshold=2.5)
 
-        X_left, Y_left, X_right, Y_right = decision_tree.partition(X, Y,
-            predicate)
+        X_left, Y_left, X_right, Y_right, W_left, W_right = partition(
+            predicate, X, Y, W)
         self.assertEqual(X_left, [[1], [2]])
         self.assertEqual(Y_left, [[1], [0]])
         self.assertEqual(X_right, [[4], [3]])
         self.assertEqual(Y_right, [[0], [1]])
+        self.assertIsNone(W_left)
+        self.assertIsNone(W_right)
+
+    def test_partition_with_weights(self):
+        X = [[4], [3], [1], [2]]
+        Y = [[0], [1], [1], [0]]
+        W = [1, 2, 3, 4]
+        predicate = decision_tree.ThresholdPredicate(
+            feature_index=0, threshold=2.5)
+
+        X_left, Y_left, X_right, Y_right, W_left, W_right = partition(
+            predicate, X, Y, W)
+        self.assertEqual(X_left, [[1], [2]])
+        self.assertEqual(Y_left, [[1], [0]])
+        self.assertEqual(X_right, [[4], [3]])
+        self.assertEqual(Y_right, [[0], [1]])
+        self.assertEqual(W_left, [3, 4])
+        self.assertEqual(W_right, [1, 2])
 
 class DecisionTreeTestCase(unittest.TestCase):
 
@@ -440,6 +459,21 @@ class DecisionTreeClassifierTest(DecisionTreeTestCase):
                     feature_index=1, threshold=-1.5),
                 left=decision_tree.TerminalNode(1),
                 right=decision_tree.TerminalNode(0)))
+
+    def test_should_pick_best_split_from_weighted_data(self):
+        model = decision_tree.DecisionTreeClassifier(max_depth=1)
+        model.fit(
+            X=[[1], [2], [3], [4], [5], [6], [7]],
+            Y=[0, 0, 1, 0, 1, 1, 1],
+            weights=[10, 1, 1, 1, 1, 1, 1])
+        # Without weights the threshold is 4.5
+        self.assertTreesEqual(
+            model.root,
+            decision_tree.InteriorNode(
+                predicate=decision_tree.ThresholdPredicate(
+                    feature_index=0, threshold=2.5),
+                left=decision_tree.TerminalNode(0),
+                right=decision_tree.TerminalNode(1)))
 
     def test_predict(self):
         model = decision_tree.DecisionTreeClassifier()
@@ -493,6 +527,21 @@ class DecisionTreeRegressorTest(DecisionTreeTestCase):
                     feature_index=1, threshold=-1.5),
                 left=decision_tree.TerminalNode(5.0),
                 right=decision_tree.TerminalNode(3.0)))
+
+    def test_should_pick_best_split_from_weighted_data(self):
+        model = decision_tree.DecisionTreeClassifier(max_depth=1)
+        model.fit(
+            X=[[1], [2], [3], [4], [5], [6], [7]],
+            Y=[3, 3, 5, 3, 5, 5, 5],
+            weights=[10, 1, 1, 1, 1, 1, 1])
+        # Without weights the threshold is 4.5
+        self.assertTreesEqual(
+            model.root,
+            decision_tree.InteriorNode(
+                predicate=decision_tree.ThresholdPredicate(
+                    feature_index=0, threshold=2.5),
+                left=decision_tree.TerminalNode(3),
+                right=decision_tree.TerminalNode(5)))
 
     def test_predict(self):
         model = decision_tree.DecisionTreeRegressor()
