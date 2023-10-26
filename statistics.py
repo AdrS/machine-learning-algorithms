@@ -25,14 +25,15 @@ def cumulative_sum(X):
 def median(X, weights=None):
     if not X:
         raise ValueError('Input must be non-empty')
-    X.sort()
     if weights:
+        X, weights = zip(*sorted(zip(X, weights)))
         # https://stackoverflow.com/questions/20601872/numpy-or-scipy-to-calculate-weighted-median
         totals = cumulative_sum(weights)
         target = totals[-1]*0.5
         i = bisect.bisect(totals, target)
         # TODO: interpolation
         return X[i]
+    X.sort()
     if len(X) % 2 == 0:
         return (X[len(X)//2] + X[len(X)//2 - 1])/2
     else:

@@ -51,6 +51,9 @@ class MedianTest(unittest.TestCase):
     def test_return_weighted_median(self):
         self.assertAlmostEqual(median([2, 4, 5, 7, 10], [3, 2, 1, 1, 1]), 4)
 
+    def test_return_weighted_median_of_unsorted_elements(self):
+        self.assertAlmostEqual(median([5, 2, 7, 4, 10], [1, 3, 1, 2, 1]), 4)
+
 
 class SignTest(unittest.TestCase):
 
