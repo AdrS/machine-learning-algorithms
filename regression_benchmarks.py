@@ -1,5 +1,6 @@
 import decision_tree
 
+from adaboost import AdaBoostRegressor
 from benchmark import Benchmark, CsvDataset, Field, run_benchmarks, main
 from gradient_boost import GradientBoostRegressor
 from loss import MeanSquaredError
@@ -102,6 +103,14 @@ class GBDT:
     def predict(self, X):
         return self.model.predict(X)
 
+class AdaBoostStumpRegressor(AdaBoostRegressor):
+    def __init__(self):
+        super().__init__(decision_tree.DecisionStumpRegressor, num_models=4)
+
+class AdaBoostTreeRegressor(AdaBoostRegressor):
+    def __init__(self):
+        super().__init__(decision_tree.DecisionTreeRegressor, num_models=4)
+
 
 # TODO: add flag to control loss function
 benchmarks = {
@@ -115,6 +124,8 @@ models = {
     'DecisionTree': DecisionTreeRegressor,
     'PrunedDecisionTree': PrunedDecisionTreeRegressor,
     'GBDT': GBDT,
+    'AdaBoostStump':AdaBoostStumpRegressor,
+    'AdaBoostTree':AdaBoostTreeRegressor,
 }
 
 if __name__ == '__main__':
