@@ -89,6 +89,26 @@ class Benchmark:
     def show_evaluation(self):
         raise NotImplementedError
 
+class Model:
+
+    def fit(self, X, Y):
+        raise NotImplementedError
+
+    def predict(self, X):
+        raise NotImplementedError
+
+    def feature_importances(self):
+        pass
+
+    def show_feature_importance(self, feature_names):
+        feature_importances = self.feature_importances()
+        if feature_importances is None:
+            return
+
+        print('Feature importance:')
+        for i, score in feature_importances:
+            print(feature_names[i], ':', score)
+
 def run_benchmarks(benchmarks, models):
     for benchmark_name, benchmark in benchmarks.items():
         print('Benchmark: ', benchmark_name)
@@ -114,6 +134,8 @@ def run_benchmarks(benchmarks, models):
             Y_test_pred = model.predict(X_test)
             benchmark.show_evaluation(
                 benchmark.evaluate_test_predictions(Y_test_pred))
+
+            model.show_feature_importance(benchmark.dataset.feature_names())
         print('#'*80)
         print('')
 

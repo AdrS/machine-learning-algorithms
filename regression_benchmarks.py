@@ -1,7 +1,7 @@
 import decision_tree
 
 from adaboost import AdaBoostRegressor
-from benchmark import Benchmark, CsvDataset, Field, run_benchmarks, main
+from benchmark import Benchmark, CsvDataset, Field, run_benchmarks, main, Model
 from gradient_boost import GradientBoostRegressor
 from loss import MeanSquaredError
 from sklearn.model_selection import train_test_split
@@ -69,7 +69,7 @@ class RegressionBenchmark(Benchmark):
     def show_evaluation(self, evaluation_results):
         print('Loss:', evaluation_results['loss'])
 
-class DecisionTreeRegressor:
+class DecisionTreeRegressor(Model):
 
     def __init__(self, *args, **kwargs):
         self.model = decision_tree.DecisionTreeRegressor(*args, **kwargs)
@@ -80,6 +80,23 @@ class DecisionTreeRegressor:
     def predict(self, X):
         return self.model.predict(X)
 
+    def feature_importances(self):
+        return self.model.feature_importances()
+
+class DecisionStumpRegressor(Model):
+
+    def __init__(self, *args, **kwargs):
+        self.model = decision_tree.DecisionStumpRegressor(*args, **kwargs)
+
+    def fit(self, X, Y):
+        self.model.fit(X, Y)
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+    def feature_importances(self):
+        return self.model.feature_importances()
+
 class PrunedDecisionTreeRegressor(DecisionTreeRegressor):
 
     def fit(self, X, Y):
@@ -88,7 +105,7 @@ class PrunedDecisionTreeRegressor(DecisionTreeRegressor):
         self.model.fit(X_train, Y_train)
         self.model.prune(X_val, Y_val)
 
-class GBDT:
+class GBDT(Model):
 
     def __init__(self):
         self.model = GradientBoostRegressor(
@@ -103,13 +120,25 @@ class GBDT:
     def predict(self, X):
         return self.model.predict(X)
 
-class AdaBoostStumpRegressor(AdaBoostRegressor):
+class AdaBoostStumpRegressor(Model):
     def __init__(self):
-        super().__init__(decision_tree.DecisionStumpRegressor, num_models=4)
+        self.model = AdaBoostRegressor(decision_tree.DecisionStumpRegressor, num_models=4)
 
-class AdaBoostTreeRegressor(AdaBoostRegressor):
+    def fit(self, X, Y):
+        self.model.fit(X, Y)
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+class AdaBoostTreeRegressor(Model):
     def __init__(self):
-        super().__init__(decision_tree.DecisionTreeRegressor, num_models=4)
+        self.model = AdaBoostRegressor(decision_tree.DecisionTreeRegressor, num_models=4)
+
+    def fit(self, X, Y):
+        self.model.fit(X, Y)
+
+    def predict(self, X):
+        return self.model.predict(X)
 
 
 # TODO: add flag to control loss function
@@ -120,7 +149,7 @@ benchmarks = {
         CaliforniaHousing(), MeanSquaredError()),
 }
 models = {
-    'DecisionStump': decision_tree.DecisionStumpRegressor,
+    'DecisionStump': DecisionStumpRegressor,
     'DecisionTree': DecisionTreeRegressor,
     'PrunedDecisionTree': PrunedDecisionTreeRegressor,
     'GBDT': GBDT,

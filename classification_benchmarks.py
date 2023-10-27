@@ -2,7 +2,7 @@ import argparse
 import decision_tree
 
 from adaboost import AdaBoostClassifier
-from benchmark import Benchmark, CsvDataset, Field, run_benchmarks, main
+from benchmark import Benchmark, CsvDataset, Field, run_benchmarks, main, Model
 from collections import Counter
 from sklearn.model_selection import train_test_split
 
@@ -108,7 +108,7 @@ class ClassificationBenchmark(Benchmark):
     def show_evaluation(self, evaluation_results):
         print('Accuracy:', evaluation_results['accuracy'])
 
-class DecisionTreeClassifier:
+class DecisionTreeClassifier(Model):
 
     def __init__(self):
         self.max_depth=999999
@@ -121,6 +121,23 @@ class DecisionTreeClassifier:
     def predict(self, X):
         return self.model.predict(X)
 
+    def feature_importances(self):
+        return self.model.feature_importances()
+
+class DecisionStumpClassifier(Model):
+
+    def __init__(self):
+        self.model = decision_tree.DecisionStumpClassifier()
+
+    def fit(self, X, Y):
+        self.model.fit(X, Y)
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+    def feature_importances(self):
+        return self.model.feature_importances()
+
 class PrunedDecisionTreeClassifier(DecisionTreeClassifier):
 
     def fit(self, X, Y):
@@ -129,14 +146,28 @@ class PrunedDecisionTreeClassifier(DecisionTreeClassifier):
         self.model.fit(X_train, Y_train)
         self.model.prune(X_val, Y_val)
 
-class AdaBoostStumpClassifier(AdaBoostClassifier):
+class AdaBoostStumpClassifier(Model):
     def __init__(self):
-        super().__init__(decision_tree.DecisionStumpClassifier, num_models=4)
+        self.model = AdaBoostClassifier(decision_tree.DecisionStumpClassifier,
+            num_models=4)
 
-class AdaBoostTreeClassifier(AdaBoostClassifier):
+    # TODO:: refactor to get rid of this boilerplate
+    def fit(self, X, Y):
+        self.model.fit(X, Y)
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+class AdaBoostTreeClassifier(Model):
     def __init__(self):
-        super().__init__(decision_tree.DecisionTreeClassifier, num_models=4)
+        self.model = AdaBoostClassifier(decision_tree.DecisionTreeClassifier,
+            num_models=4)
 
+    def fit(self, X, Y):
+        self.model.fit(X, Y)
+
+    def predict(self, X):
+        return self.model.predict(X)
 
 benchmarks = {
     'census-income': ClassificationBenchmark(CensusIncomeDataset()),
@@ -144,7 +175,7 @@ benchmarks = {
     'amazon-employee-access': ClassificationBenchmark(AmazonEmployeeAccessDataset()),
 }
 models = {
-    'DecisionStump': decision_tree.DecisionStumpClassifier,
+    'DecisionStump': DecisionStumpClassifier,
     'DecisionTree': DecisionTreeClassifier,
     'PrunedDecisionTree': PrunedDecisionTreeClassifier,
     'AdaBoostStump':AdaBoostStumpClassifier,

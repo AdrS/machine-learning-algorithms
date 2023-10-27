@@ -550,6 +550,7 @@ class DecisionTreeRegressorTest(DecisionTreeTestCase):
         self.assertEqual(model.predict([[1, -1], [0, -2], [1, -3]]), [3, 5, 5])
 
     # TODO: prune, score, loss, export text
+    # TODO: information_gain, feature importance
 
 class DecisionStumpClassifierTest(DecisionTreeTestCase):
 

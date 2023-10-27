@@ -1,6 +1,6 @@
 import math
 
-from collections import Counter
+from collections import Counter, defaultdict
 from loss import MeanSquaredError
 from statistics import average, variance, median
 
@@ -64,8 +64,14 @@ def is_numerical(x):
 def is_categorical(x):
     return type(x) == str
 
-class TerminalNode:
-    def __init__(self, value, distribution=None):
+class Node:
+    def __init__(self, impurity=None, num_examples=None):
+        self.impurity = impurity
+        self.num_examples = num_examples
+
+class TerminalNode(Node):
+    def __init__(self, value, distribution=None, **kwargs):
+        super().__init__(**kwargs)
         self.value = value
         self.distribution = distribution
 
@@ -80,8 +86,9 @@ class TerminalNode:
     def __repr__(self, indent=None):
         return 'TerminalNode(value=%r)' % (self.value,)
 
-class InteriorNode:
-    def __init__(self, predicate, left, right):
+class InteriorNode(Node):
+    def __init__(self, predicate, left, right, **kwargs):
+        super().__init__(**kwargs)
         self.predicate = predicate
         self.left = left
         self.right = right
@@ -105,6 +112,12 @@ class InteriorNode:
             self.left.__repr__(indent + 2),
             ' '*(indent + 2),
             self.right.__repr__(indent + 2))
+
+    def information_gain(self):
+        p_left = self.left.num_examples/self.num_examples
+        p_right = self.right.num_examples/self.num_examples
+        return (self.impurity - p_left*self.left.impurity -
+                p_right*self.right.impurity)
 
 def compute_probability_distribution(X, weights=None):
     '''Returns the probability distribution for the frequency of values in X.
@@ -220,13 +233,21 @@ def partition(split_predicate, X, Y, weights=None):
                 Y_right.append(y)
         return X_left, Y_left, X_right, Y_right, None, None
 
-def score_split(Y_left, Y_right, W_left, W_right, impurity):
+def weighted_num_examples(Y, weights=None):
+    if weights:
+        return sum(weights)
+    else:
+        return len(Y)
+
+def information_gain(parent, Y_left, Y_right, W_left, W_right, impurity):
     # IG = I(Y) - p_left*I(Y_left) - p_right*I(Y_right)
-    p_left = len(Y_left) if W_left is None else sum(W_left)
-    p_right = len(Y_right) if W_right is None else sum(W_right)
-    lhs = p_left*impurity(Y_left, W_left)*p_left
-    rhs = p_right*impurity(Y_right, W_right)*p_right
-    return lhs + rhs
+    p_left = weighted_num_examples(Y_left, W_left)
+    p_right = weighted_num_examples(Y_right, W_right)
+    total_examples = p_left + p_right
+    p_left /= total_examples
+    p_right /= total_examples
+    return (parent.impurity - p_left*impurity(Y_left, W_left) -
+                p_right*impurity(Y_right, W_right))
 
 class DecisionTree:
     def __init__(self, impurity, max_depth):
@@ -236,10 +257,27 @@ class DecisionTree:
         # Alpha value and a replacement terminal node for each branch.
         self.branch_pruning_info = None
 
+    def feature_importances(self):
+        # Feature importance is the total information gain from each node using
+        # a feature in the split predicate weighted by the size of the subtree.
+        feature_importances = defaultdict(int)
+        total_examples = self.root.num_examples
+        def traverse(node):
+            if type(node) != InteriorNode:
+                return
+            p = node.num_examples/total_examples
+            feature = node.predicate.feature_index
+            feature_importances[feature] += p*node.information_gain()
+            traverse(node.left)
+            traverse(node.right)
+        traverse(self.root)
+        # Return a list of features sorted by importance
+        return sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)
+
     def is_pure(self, Y):
         raise NotImplementedError
 
-    def create_terminal_node(self, Y, weights=None):
+    def create_terminal_node(self, Y, weights, impurity, num_examples):
         raise NotImplementedError
 
     def construct_decision_tree(self, X, Y, weights, num_examples, depth):
@@ -250,12 +288,13 @@ class DecisionTree:
             size - number of nodes in the tree
             cost - sum over leaf t of p(t)*impurity(t)
         '''
-        node_cost = len(Y)/num_examples*self.impurity(Y, weights)
-        terminal_node = self.create_terminal_node(Y, weights)
+        terminal_node = self.create_terminal_node(Y, weights,
+            self.impurity(Y, weights), weighted_num_examples(Y, weights))
+        node_cost = terminal_node.num_examples/num_examples*terminal_node.impurity
         if self.is_pure(Y) or depth >= self.max_depth:
             return terminal_node, 1, node_cost
 
-        best_score = float('inf')
+        best_score = -1
         best_split = None
         for split_predicate in propose_split_predicates(X, Y, self.impurity,
                 slow=(weights is not None)):
@@ -264,9 +303,9 @@ class DecisionTree:
                 split_predicate, X, Y, weights)
             if not X_left or not X_right:
                 continue
-            score = score_split(Y_left, Y_right, W_left, W_right, self.impurity)
-
-            if score < best_score:
+            score = information_gain(terminal_node, Y_left, Y_right,
+                        W_left, W_right, self.impurity)
+            if score > best_score:
                 best_score = score
                 best_split = (split_predicate, X_left, Y_left, X_right,
                     Y_right, W_left, W_right)
@@ -285,15 +324,17 @@ class DecisionTree:
             X_right, Y_right, W_right, num_examples, depth + 1)
         branch_size = left_size + right_size + 1
         branch_cost = left_cost + right_cost
-        branch = InteriorNode(split_predicate, left_branch, right_branch)
+        branch = InteriorNode(split_predicate, left_branch, right_branch,
+            impurity=terminal_node.impurity,
+            num_examples=terminal_node.num_examples)
         alpha = (node_cost - branch_cost)/(branch_size - 1)
         self.branch_pruning_info[id(branch)] = (alpha, terminal_node)
         return branch, branch_size, branch_cost
 
     def fit(self, X, Y, weights=None):
         self.branch_pruning_info = {}
-        self.root, _, _ = self.construct_decision_tree(
-                X, Y, weights, num_examples=len(Y), depth=0)
+        self.root, _, _ = self.construct_decision_tree(X, Y, weights,
+                num_examples=weighted_num_examples(Y, weights), depth=0)
 
     def predict(self, X):
         return [self.root.predict(x) for x in X]
@@ -312,7 +353,9 @@ class DecisionTree:
             if node_alpha <= alpha:
                 return terminal_node
             return InteriorNode(
-                node.predicate, prune(node.left), prune(node.right))
+                node.predicate, prune(node.left), prune(node.right),
+                impurity=node.impurity,
+                num_examples=node.num_examples)
         return prune(self.root)
 
     def prune(self, X_validation, Y_validation):
@@ -384,7 +427,7 @@ class DecisionTreeClassifier(DecisionTree):
                 return False
         return True
 
-    def create_terminal_node(self, Y, weights=None):
+    def create_terminal_node(self, Y, weights, impurity, num_examples):
         distribution = compute_probability_distribution(Y, weights)
         # Predict the most common class
         mode = None
@@ -393,7 +436,8 @@ class DecisionTreeClassifier(DecisionTree):
             if p > highest_prob:
                 mode = y
                 highest_prob = p
-        return TerminalNode(mode, distribution)
+        return TerminalNode(mode, distribution, impurity=impurity,
+                    num_examples=num_examples)
 
     def predict_prob(self, X):
         return [self.root.predict_prob(x) for x in X]
@@ -430,8 +474,9 @@ class DecisionTreeRegressor(DecisionTree):
             return True
         return max(Y) - min(Y) < self.purity_tolerance
 
-    def create_terminal_node(self, Y, weights=None):
-        return TerminalNode(self.loss.prior(Y, weights))
+    def create_terminal_node(self, Y, weights, impurity, num_examples):
+        return TerminalNode(self.loss.prior(Y, weights),
+                    impurity=impurity, num_examples=num_examples)
 
     def score(self, X, Y):
         return self.tree_loss(self.root, X, Y)
