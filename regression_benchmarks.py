@@ -28,7 +28,7 @@ class BostonHousing(CsvDataset):
         skip_header=True)
 
 class CaliforniaHousing(CsvDataset):
-    def __init__(self, path='data/CaliforniaHousing/cal_housing.data'):
+    def __init__(self, path='data/california-housing/CaliforniaHousing/cal_housing.data'):
         super().__init__(path, feature_fields = [
             Field('longitude', 0, float),
             Field('latitude', 1, float),

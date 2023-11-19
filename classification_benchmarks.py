@@ -69,7 +69,7 @@ class DontGetKickedDataset(CsvDataset):
         skip_header=True)
 
 class AmazonEmployeeAccessDataset(CsvDataset):
-    def __init__(self, path='data/amazon-employee-access-challenge-train.csv'):
+    def __init__(self, path='data/amazon-employee-access-challenge/train.csv'):
         super().__init__(path, feature_fields = [
             Field('RESOURCE', 1),
             Field('MGR_ID', 2),
@@ -151,7 +151,7 @@ class AdaBoostStumpClassifier(Model):
         self.model = AdaBoostClassifier(decision_tree.DecisionStumpClassifier,
             num_models=4)
 
-    # TODO:: refactor to get rid of this boilerplate
+    # TODO: refactor to get rid of this boilerplate
     def fit(self, X, Y):
         self.model.fit(X, Y)
 

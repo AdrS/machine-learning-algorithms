@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# Downloads a file if it is not already present.
+# Arguments: $1 = URL, $2 = output file
+function maybe_download() {
+  if ! [ -f $2 ]; then
+    curl -o $2 "$1"
+  fi
+}
+
+# Downloads and extracts a zip file.
+# Arguments: $1 = URL, $2 = output directory
+function download_zip() {
+  maybe_download $1 "$2.zip"
+  unzip -n $2.zip -d $2
+}
+
+# Downloads and extracts a gzip compressed tar file.
+# Arguments: $1 = URL, $2 = output directory
+function download_tar_gz() {
+  maybe_download $1 "$2.tar.gz"
+  mkdir -p $2
+  tar --skip-old-files -xf $2.tar.gz --directory $2
+}
+
+# Downloads and extracts the files for a Kaggle competition
+# Arguments: $1 = name of Kaggle competition
+function download_kaggle_competition_files() {
+  kaggle competitions download -c $1
+  mkdir -p $1
+  unzip -n $1.zip -d $1
+}
+
+# Classification Datasets
+download_zip "https://archive.ics.uci.edu/static/public/2/adult.zip" census-income
+download_kaggle_competition_files DontGetKicked
+download_kaggle_competition_files amazon-employee-access-challenge
+download_kaggle_competition_files home-credit-default-risk
+download_kaggle_competition_files santander-customer-transaction-prediction
+download_kaggle_competition_files ieee-fraud-detection
+download_kaggle_competition_files microsoft-malware-prediction
+download_kaggle_competition_files vsb-power-line-fault-detection
+
+# Regression Datasets
+download_kaggle_competition_files boston-housing
+download_tar_gz "https://www.dcc.fc.up.pt/~ltorgo/Regression/cal_housing.tgz" california-housing
