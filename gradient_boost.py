@@ -12,7 +12,6 @@ class GradientBoostModel:
             num_models=50,
             learning_rate=0.1,
             sample_fraction=None):
-        # TODO: step length
         self.create_base_model = create_base_model
         self.loss_fn = loss_fn
         self.num_models = num_models
