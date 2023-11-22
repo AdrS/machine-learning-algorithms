@@ -1,5 +1,6 @@
 import unittest
 import math
+import numpy as np
 import pandas as pd
 
 from data_exploration import *
@@ -36,44 +37,6 @@ class IsNumericalTest(unittest.TestCase):
         series = pd.Series([1, 2, None, 4, None])
         self.assertTrue(is_numerical(series))
 
-class IsCategoricalTest(unittest.TestCase):
-
-    def test_float_not_categorical(self):
-        series = pd.Series([1.2, 3.4])
-        self.assertFalse(is_categorical(series))
-
-    def test_int_with_many_unique_values_not_categorical(self):
-        series = pd.Series([1, 2, 4])
-        self.assertFalse(is_categorical(series, max_unique_values=2))
-
-    def test_int_with_few_unique_values_is_categorical(self):
-        series = pd.Series([1, 2, 1])
-        self.assertTrue(is_categorical(series, max_unique_values=2))
-
-    def test_bool_is_categorical(self):
-        series = pd.Series([True, False])
-        self.assertTrue(is_categorical(series))
-
-    def test_string_is_categorical(self):
-        series = pd.Series(['hi', 'bye'])
-        self.assertTrue(is_categorical(series))
-
-    def test_missing_values_ok(self):
-        series = pd.Series(['a', 'b', None, 'a', None])
-        self.assertTrue(is_categorical(series))
-
-class InferCategoricalFieldsTest(unittest.TestCase):
-
-    def test_does_not_change_type_of_numerical_fields(self):
-        df = pd.DataFrame([1.2, 3.4])
-        infer_categorical_fields(df)
-        self.assertEqual(df[0].dtype, float)
-
-    def test_changes_type_of_fields_to_categorical(self):
-        df = pd.DataFrame(['hi', 'bye'])
-        infer_categorical_fields(df)
-        self.assertEqual(type(df[0].dtype), pd.CategoricalDtype)
-
 class CategoricalFieldSummaryTest(unittest.TestCase):
 
     def test_has_most_frequent_categories(self):
@@ -90,8 +53,8 @@ class DatasetSummaryTest(unittest.TestCase):
 
     def test_records_size(self):
         s = DatasetSummary(pd.DataFrame({'a':[1,2,3], 'b':[2,4,6]}))
-        self.assertEqual(s.num_fields, 2)
-        self.assertEqual(s.num_records, 3)
+        self.assertEqual(s.description['num_fields'], 2)
+        self.assertEqual(s.description['num_records'], 3)
 
 if __name__ == '__main__':
     unittest.main()

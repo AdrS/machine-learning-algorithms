@@ -1,6 +1,8 @@
 import argparse
 import math
+import numpy as np
 import pandas as pd
+from data_transform import pick_smallest_datatypes
 
 class FieldSummary:
 
@@ -13,17 +15,9 @@ class FieldSummary:
 def is_numerical(series):
     return series.dtype == float or series.dtype == int or series.dtype == bool
 
-def is_categorical(series, max_unique_values=100):
-    if series.dtype == float:
-        return False
-    if series.dtype == int and series.unique().size > max_unique_values:
-        return False
-    # Bool, string, ...
-    return True
-
-def infer_categorical_fields(X, max_categorical_int_unique_values=100):
+def set_categorical_fields(X, max_categorical_int_unique_values=20):
     for field in X.columns:
-        if is_categorical(X[field]):
+        if X[field].dtype == 'object':
             X[field] = X[field].astype('category')
 
 class SummaryReporter:
@@ -72,6 +66,7 @@ class NumericalFieldSummary(FieldSummary):
         reporter.report_dataframe(self.description[
             ['type', 'percent_missing', 'mean', 'std', 'min', '25%', '50%',
             '75%', 'max']])
+        # For numerical fields with few values, report the most frequent
 
 
 def create_description_dataframe(attributes):
@@ -98,15 +93,30 @@ class DatasetSummary:
             reporter.report_heading(f'Field {field}', 2)
             summary.report(reporter)
 
+def load_dataset(path, missing_header, optimize_memory=False):
+    kwargs = {}
+    if missing_header:
+        kwargs['header'] = None
+
+    if optimize_memory:
+        # Optimize the column datatypes using a sample of the dataset
+        partial_dataset = next(
+            pd.read_csv(args.dataset, chunksize=1000 ,**kwargs))
+        pick_smallest_datatypes(partial_dataset)
+        kwargs['dtype'] = dict(partial_dataset.dtypes)
+        del partial_dataset
+
+    dataset = pd.read_csv(args.dataset, **kwargs)
+    set_categorical_fields(dataset)
+    return dataset
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', required=True)
     parser.add_argument('--missing_header', action='store_true')
+    parser.add_argument('--optimize_memory', action='store_true')
     args = parser.parse_args()
-    kwargs = {}
-    if args.missing_header:
-        kwargs['header'] = None
-    dataset = pd.read_csv(args.dataset, **kwargs)
-    infer_categorical_fields(dataset)
+    dataset = load_dataset(args.dataset, args.missing_header,
+        args.optimize_memory)
 
     DatasetSummary(dataset).report(StdoutReporter())
