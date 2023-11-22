@@ -15,28 +15,6 @@ class FieldSummaryTest(unittest.TestCase):
         s = FieldSummary(pd.Series([1, 2, None, 4, None]))
         self.assertEqual(s.description['max'], 4)
 
-class IsNumericalTest(unittest.TestCase):
-
-    def test_float_is_numerical(self):
-        series = pd.Series([1.2, 3.4])
-        self.assertTrue(is_numerical(series))
-
-    def test_int_is_numerical(self):
-        series = pd.Series([1, 2, 4])
-        self.assertTrue(is_numerical(series))
-
-    def test_bool_is_numerical(self):
-        series = pd.Series([True, False])
-        self.assertTrue(is_numerical(series))
-
-    def test_string_not_numerical(self):
-        series = pd.Series(['hi', 'bye'])
-        self.assertFalse(is_numerical(series))
-
-    def test_missing_values_ok(self):
-        series = pd.Series([1, 2, None, 4, None])
-        self.assertTrue(is_numerical(series))
-
 class CategoricalFieldSummaryTest(unittest.TestCase):
 
     def test_has_most_frequent_categories(self):
@@ -48,6 +26,28 @@ class CategoricalFieldSummaryTest(unittest.TestCase):
         s = CategoricalFieldSummary(pd.Series(['a', 'b', None, 'a', None]))
         self.assertAlmostEqual(s.description['entropy'],
             -2/5*math.log2(2/5) - 2/5*math.log2(2/5) - 1/5*math.log2(1/5))
+
+class NumericalFieldSummaryTest(unittest.TestCase):
+
+    def test_has_description(self):
+        s = NumericalFieldSummary(pd.Series([1, 2, 3, 4, None, 6, None]))
+        self.assertAlmostEqual(s.description['percent_missing'], 2/7)
+        self.assertAlmostEqual(s.description['mean'], 16/5)
+        self.assertAlmostEqual(s.description['min'], 1)
+        self.assertAlmostEqual(s.description['max'], 6)
+
+    def test_has_entropy_for_low_cardinality_ints(self):
+        s = NumericalFieldSummary(pd.Series([1, 2, 2]))
+        self.assertAlmostEqual(s.description['entropy'],
+            -2/3*math.log2(2/3) - 1/3*math.log2(1/3))
+
+    def test_has_most_frequent_for_low_cardinality_ints(self):
+        s = NumericalFieldSummary(pd.Series([1, 2, 2]))
+        self.assertIsNotNone(s.most_frequent)
+
+    def test_missing_most_frequent_for_low_cardinality_floats(self):
+        s = NumericalFieldSummary(pd.Series([1.1, 2.1, 2.1]))
+        self.assertIsNone(s.most_frequent)
 
 class DatasetSummaryTest(unittest.TestCase):
 

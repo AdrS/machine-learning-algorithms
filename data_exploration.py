@@ -6,11 +6,18 @@ from data_transform import pick_smallest_datatypes
 
 class FieldSummary:
 
-    def __init__(self, series):
+    def __init__(self, series, find_most_frequent=False):
         self.description = series.describe()
         self.description['percent_missing'] = \
             float(series.isnull().sum()/len(series))
         self.description['type'] = series.dtype
+
+        self.most_frequent = None
+        if find_most_frequent:
+            self.most_frequent = series.value_counts(dropna=False).sort_values(
+                ascending=False)/len(series)
+            self.description['entropy'] = \
+              -self.most_frequent.map(lambda x: x*math.log2(x)).sum()
 
 def is_numerical(series):
     return series.dtype == float or series.dtype == int or series.dtype == bool
@@ -44,12 +51,7 @@ class StdoutReporter:
 class CategoricalFieldSummary(FieldSummary):
 
     def __init__(self, series):
-        super().__init__(series)
-        self.most_frequent = series.value_counts(dropna=False).sort_values(
-            ascending=False)
-        self.most_frequent /= len(series)
-        self.description['entropy'] = \
-          -self.most_frequent.map(lambda x: x*math.log2(x)).sum()
+        super().__init__(series, find_most_frequent=True)
 
     def report(self, reporter):
         reporter.report_dataframe(self.description[
@@ -59,14 +61,24 @@ class CategoricalFieldSummary(FieldSummary):
 
 class NumericalFieldSummary(FieldSummary):
 
-    def __init__(self, series):
-        super().__init__(series)
+    def __init__(self, series, max_unique_values=100):
+        # Integer fields with few values might be storing categorical data.
+        # Report the most frequent values.
+        # Note: this does not detect integer fields with missing values that
+        # are encoded as float to use NaN to represent a missing value.
+        find_most_frequent = (np.issubdtype(series.dtype, np.integer) and
+            series.unique().size < max_unique_values)
+        super().__init__(series, find_most_frequent)
 
     def report(self, reporter):
-        reporter.report_dataframe(self.description[
-            ['type', 'percent_missing', 'mean', 'std', 'min', '25%', '50%',
-            '75%', 'max']])
-        # For numerical fields with few values, report the most frequent
+        fields = ['type', 'percent_missing', 'mean', 'std', 'min', '25%',
+            '50%', '75%', 'max']
+        if 'entropy' in self.description:
+            fields += ['entropy']
+        reporter.report_dataframe(self.description[fields])
+        if self.most_frequent is not None:
+            reporter.report_heading('Most frequent values', 3)
+            reporter.report_dataframe(self.most_frequent)
 
 
 def create_description_dataframe(attributes):
