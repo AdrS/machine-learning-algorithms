@@ -173,6 +173,7 @@ class DatasetSummary:
             new_field_sumary = (CategoricalFieldSummary if is_categorical else
                 NumericalFieldSummary)
             self.fields[field] = new_field_sumary(X[field])
+        self.corr = X.corr(numeric_only=True)
 
     def report(self, reporter):
         reporter.report_heading(f'Dataset Summary', 1)
@@ -181,6 +182,10 @@ class DatasetSummary:
         for field, summary in self.fields.items():
             reporter.report_heading(f'Field {field}', 2)
             summary.report(reporter)
+
+        reporter.report_heading('Field Correlations', 2)
+        sns.heatmap(self.corr)
+        reporter.save_figure()
 
         reporter.report_heading('Less useful fields', 2)
         reporter.print('Mostly missing fields:', self.mostly_missing_fields())
