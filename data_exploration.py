@@ -11,27 +11,6 @@ import sys
 from data_transform import pick_smallest_datatypes
 from xml.etree import ElementTree as ET
 
-class FieldSummary:
-
-    def __init__(self, series, find_most_frequent=False):
-        self.description = series.describe()
-        self.description['percent_missing'] = \
-            float(series.isnull().sum()/len(series))
-        self.description['type'] = series.dtype
-
-        self.most_frequent = None
-        if find_most_frequent:
-            self.most_frequent = series.value_counts(dropna=False).sort_values(
-                ascending=False)/len(series)
-            self.description['entropy'] = \
-              -self.most_frequent.map(lambda x: x*math.log2(x)).sum()
-        self.series = series
-
-def set_categorical_fields(X, max_categorical_int_unique_values=20):
-    for field in X.columns:
-        if X[field].dtype == 'object':
-            X[field] = X[field].astype('category')
-
 class SummaryReporter:
 
     def __init__(self, output_directory):
@@ -48,6 +27,7 @@ class SummaryReporter:
         if not name:
             name = 'fig%d.png' % (self.num_figures,)
             self.num_figures += 1
+        plt.tight_layout()
         plt.savefig(os.path.join(self.output_directory, name))
         plt.close()
         return name
@@ -121,27 +101,67 @@ class HtmlReporter(SummaryReporter):
         with open(path, 'wb') as f:
             ET.ElementTree(html).write(f, encoding='utf-8', method='html')
 
+class FieldSummary:
+
+    def __init__(self, series, class_labels=None, target_values=None,
+            find_most_frequent=False):
+        self.series = series
+        self.class_labels = class_labels
+        self.target_values = target_values
+        self.description = series.describe()
+        self.description['percent_missing'] = \
+            float(series.isnull().sum()/len(series))
+        self.description['type'] = series.dtype
+
+        self.most_frequent = None
+        if find_most_frequent:
+            self.most_frequent = series.value_counts(dropna=False).sort_values(
+                ascending=False)/len(series)
+            self.description['entropy'] = \
+              -self.most_frequent.map(lambda x: x*math.log2(x)).sum()
+
+def set_categorical_fields(X, max_categorical_int_unique_values=20):
+    for field in X.columns:
+        if X[field].dtype == 'object':
+            X[field] = X[field].astype('category')
+
 class CategoricalFieldSummary(FieldSummary):
 
-    def __init__(self, series):
-        super().__init__(series, find_most_frequent=True)
+    def __init__(self, series, class_labels=None, target_values=None):
+        super().__init__(series, class_labels, target_values,
+           find_most_frequent=True)
 
     def report(self, reporter):
         reporter.report_dataframe(self.description[
             ['type', 'percent_missing', 'unique', 'entropy']])
         reporter.report_heading('Most frequent values', 3)
         reporter.report_dataframe(self.most_frequent)
+        if (self.class_labels is not None and
+            self.series is not self.class_labels):
+            # TODO: limit size
+            # T[i][j] = # with ith class_label and jth field class/# with jth field class
+            ct = pd.crosstab(self.class_labels, self.series)
+            sns.heatmap(ct.div(ct.sum(axis=0)))
+            reporter.save_figure()
+        if self.target_values is not None:
+            # TODO: limit plot to top N + other
+            # - set any value in the series not in the to N to 'other'
+            # Also consider using violin plots
+            sns.boxplot(x=self.series, y=self.target_values)
+            reporter.save_figure()
 
 class NumericalFieldSummary(FieldSummary):
 
-    def __init__(self, series, max_unique_values=100):
+    def __init__(self, series, class_labels=None, target_values=None,
+            max_unique_values=100):
         # Integer fields with few values might be storing categorical data.
         # Report the most frequent values.
         # Note: this does not detect integer fields with missing values that
         # are encoded as float to use NaN to represent a missing value.
         find_most_frequent = (np.issubdtype(series.dtype, np.integer) and
             series.unique().size < max_unique_values)
-        super().__init__(series, find_most_frequent)
+        super().__init__(series, class_labels, target_values,
+            find_most_frequent)
 
     def report(self, reporter):
         fields = ['type', 'percent_missing', 'mean', 'std', 'min', '25%',
@@ -156,6 +176,13 @@ class NumericalFieldSummary(FieldSummary):
         if self.most_frequent is not None:
             reporter.report_heading('Most frequent values', 3)
             reporter.report_dataframe(self.most_frequent)
+        if self.class_labels is not None:
+            sns.boxplot(x=self.series, y=self.class_labels)
+            reporter.save_figure()
+        if (self.target_values is not None
+                and self.series is not self.target_values):
+            sns.scatterplot(x=self.series, y=self.target_values)
+            reporter.save_figure()
 
 
 def create_description_dataframe(attributes):
@@ -164,15 +191,18 @@ def create_description_dataframe(attributes):
 
 class DatasetSummary:
 
-    def __init__(self, X):
+    def __init__(self, X, class_label=None, target_value=None):
         self.description = create_description_dataframe(
             {'num_fields':X.columns.size, 'num_records':X.shape[0]})
         self.fields = {}
+        class_labels = X[class_label] if class_label else None
+        target_values = X[target_value] if target_value else None
         for field in X.columns:
             is_categorical = type(X[field].dtype) ==  pd.CategoricalDtype
             new_field_sumary = (CategoricalFieldSummary if is_categorical else
                 NumericalFieldSummary)
-            self.fields[field] = new_field_sumary(X[field])
+            self.fields[field] = new_field_sumary(
+                X[field], class_labels, target_values)
         self.corr = X.corr(numeric_only=True)
 
     def report(self, reporter):
@@ -224,6 +254,13 @@ if __name__ == '__main__':
     )
     parser.add_argument('--dataset', required=True,
         help='Path to a CSV file containing the dataset')
+    parser.add_argument('--class_label',
+        help='Name of the column in the dataset with the target class label.'+
+        'Set this flag for classification problems.')
+    parser.add_argument('--target_value',
+        help='Name of the column in the dataset with the target class label.'+
+        'Set this flag for regression problems.')
+
     parser.add_argument('--missing_header', action='store_true',
         help='Whether the first line of the CSV file is the header')
     parser.add_argument('--optimize_memory', action='store_true')
@@ -238,4 +275,5 @@ if __name__ == '__main__':
     os.makedirs(args.output_directory, exist_ok=True)
     dataset = load_dataset(args.dataset, args.missing_header,
         args.optimize_memory)
-    DatasetSummary(dataset).report(HtmlReporter(args.output_directory))
+    DatasetSummary(dataset, args.class_label, args.target_value).report(
+        HtmlReporter(args.output_directory))
