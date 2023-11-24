@@ -1,5 +1,6 @@
 import argparse
 import io
+import logging
 import math
 import matplotlib.pyplot as plt
 import numpy as np
@@ -105,6 +106,7 @@ class FieldSummary:
 
     def __init__(self, series, class_labels=None, target_values=None,
             find_most_frequent=False):
+        logging.info('Creating field summary for %s', series.name)
         self.series = series
         self.class_labels = class_labels
         self.target_values = target_values
@@ -115,6 +117,7 @@ class FieldSummary:
 
         self.most_frequent = None
         if find_most_frequent:
+            logging.info('Finding most frequent values')
             self.most_frequent = series.value_counts(dropna=False).sort_values(
                 ascending=False)/len(series)
             self.description['entropy'] = \
@@ -132,18 +135,22 @@ class CategoricalFieldSummary(FieldSummary):
            find_most_frequent=True)
 
     def report(self, reporter):
+        logging.info('Reporting summary for categorical field %s',
+            self.series.name)
         reporter.report_dataframe(self.description[
             ['type', 'percent_missing', 'unique', 'entropy']])
         reporter.report_heading('Most frequent values', 3)
         reporter.report_dataframe(self.most_frequent)
         if (self.class_labels is not None and
             self.series is not self.class_labels):
+            logging.info('Computing correlations with target')
             # TODO: limit size
             # T[i][j] = # with ith class_label and jth field class/# with jth field class
             ct = pd.crosstab(self.class_labels, self.series)
             sns.heatmap(ct.div(ct.sum(axis=0)))
             reporter.save_figure()
         if self.target_values is not None:
+            logging.info('Computing correlations with target')
             # TODO: limit plot to top N + other
             # - set any value in the series not in the to N to 'other'
             # Also consider using violin plots
@@ -164,6 +171,8 @@ class NumericalFieldSummary(FieldSummary):
             find_most_frequent)
 
     def report(self, reporter):
+        logging.info('Reporting summary for numerical field %s',
+            self.series.name)
         fields = ['type', 'percent_missing', 'mean', 'std', 'min', '25%',
             '50%', '75%', 'max']
         if 'entropy' in self.description:
@@ -177,10 +186,12 @@ class NumericalFieldSummary(FieldSummary):
             reporter.report_heading('Most frequent values', 3)
             reporter.report_dataframe(self.most_frequent)
         if self.class_labels is not None:
+            logging.info('Computing correlations with target')
             sns.boxplot(x=self.series, y=self.class_labels)
             reporter.save_figure()
         if (self.target_values is not None
                 and self.series is not self.target_values):
+            logging.info('Computing correlations with target')
             sns.scatterplot(x=self.series, y=self.target_values)
             reporter.save_figure()
 
@@ -192,6 +203,7 @@ def create_description_dataframe(attributes):
 class DatasetSummary:
 
     def __init__(self, X, class_label=None, target_value=None):
+        logging.info('Creating dataset summary')
         self.description = create_description_dataframe(
             {'num_fields':X.columns.size, 'num_records':X.shape[0]})
         self.fields = {}
@@ -204,8 +216,10 @@ class DatasetSummary:
             self.fields[field] = new_field_sumary(
                 X[field], class_labels, target_values)
         self.corr = X.corr(numeric_only=True)
+        logging.info('Finished computing summary')
 
     def report(self, reporter):
+        logging.info('Reporting summary')
         reporter.report_heading(f'Dataset Summary', 1)
         reporter.report_dataframe(self.description)
 
@@ -221,6 +235,7 @@ class DatasetSummary:
         reporter.print('Mostly missing fields:', self.mostly_missing_fields())
         reporter.print('Low entropy fields:', self.low_entropy_fields())
         reporter.finish()
+        logging.info('Finished reporting summary')
 
     def mostly_missing_fields(self, threshold=0.9):
         return [field for field, summary in self.fields.items()
@@ -232,11 +247,13 @@ class DatasetSummary:
             summary.description['entropy'] < threshold]
 
 def load_dataset(path, missing_header, optimize_memory=False):
+    logging.info('Loading dataset %s...', path)
     kwargs = {}
     if missing_header:
         kwargs['header'] = None
 
     if optimize_memory:
+        logging.info(f'Optimizing data types')
         # Optimize the column datatypes using a sample of the dataset
         partial_dataset = next(
             pd.read_csv(args.dataset, chunksize=1000 ,**kwargs))
@@ -246,9 +263,12 @@ def load_dataset(path, missing_header, optimize_memory=False):
 
     dataset = pd.read_csv(args.dataset, **kwargs)
     set_categorical_fields(dataset)
+    logging.info('Finished loading')
     return dataset
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+
     parser = argparse.ArgumentParser(
         description='Generates a report describing the features of the dataset'
     )
