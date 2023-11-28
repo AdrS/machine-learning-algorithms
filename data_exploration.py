@@ -211,9 +211,9 @@ class DatasetSummary:
         target_values = X[target_value] if target_value else None
         for field in X.columns:
             is_categorical = type(X[field].dtype) ==  pd.CategoricalDtype
-            new_field_sumary = (CategoricalFieldSummary if is_categorical else
+            new_field_summary = (CategoricalFieldSummary if is_categorical else
                 NumericalFieldSummary)
-            self.fields[field] = new_field_sumary(
+            self.fields[field] = new_field_summary(
                 X[field], class_labels, target_values)
         self.corr = X.corr(numeric_only=True)
         logging.info('Finished computing summary')
@@ -261,7 +261,7 @@ def load_dataset(path, missing_header, optimize_memory=False):
         kwargs['dtype'] = dict(partial_dataset.dtypes)
         del partial_dataset
 
-    dataset = pd.read_csv(args.dataset, **kwargs)
+    dataset = pd.read_csv(path, **kwargs)
     set_categorical_fields(dataset)
     logging.info('Finished loading')
     return dataset
