@@ -20,6 +20,7 @@ class FieldComparison:
         train_description = train_summary.description
         test_description = test_summary.description
 
+        # Compare descriptions
         numeric_index = []
         deltas = []
         percent_deltas = []
@@ -43,12 +44,33 @@ class FieldComparison:
             percent_deltas_column
             ], axis=1)
 
+        # Compare value frequencies
         self.most_frequent_train = train_summary.most_frequent
         self.most_frequent_test = test_summary.most_frequent
 
-    def compare_most_frequent(self, reporter):
+    def compare_most_frequent(self, reporter, max_unique_values=50):
         if self.most_frequent_train is None or self.most_frequent_test is None:
             return
+        # Normalize the series to sum to 1
+        train_value_proportions = self.most_frequent_train.rename('train')/self.most_frequent_train.sum()
+        test_value_proportions = self.most_frequent_test.rename('test')/self.most_frequent_test.sum()
+
+        # reset_index converts the series to a DataFrame with a column for the
+        # series index (in this case the feature values).
+        value_proportions = pd.merge(train_value_proportions.reset_index(),
+            test_value_proportions.reset_index(), how='outer')
+        value_proportions['train'].fillna(0, inplace=True)
+        value_proportions['test'].fillna(0, inplace=True)
+        value_proportions.sort_values(by=['train', 'test'], ascending=False)
+        if value_proportions.shape[0] <= max_unique_values:
+            value_proportions.plot(x='index', y=['train', 'test'],
+              kind='bar').set(xlabel='Value', ylabel='Proportion')
+            reporter.save_figure()
+        else:
+            sns.lineplot(data=value_proportions[['train', 'test']]).set(
+            xlabel='Training value frequency rank',
+            ylabel='Proportion')
+            reporter.save_figure()
 
 class NumericalFieldComparison(FieldComparison):
 
@@ -65,9 +87,13 @@ class NumericalFieldComparison(FieldComparison):
         if 'entropy' in self.comparison:
             fields += ['entropy']
         reporter.report_dataframe(self.comparison)
-        sns.displot(data=[self.train_series.rename('train'),
-        self.test_series.rename('test')], kind='ecdf')
+        sns.displot(data=[
+            self.train_series.rename('train'),
+            self.test_series.rename('test')], kind='ecdf').set(
+            title=f'{self.train_series.name} CDF',
+            xlabel=self.train_series.name)
         reporter.save_figure()
+        self.compare_most_frequent(reporter)
 
 class CategoricalFieldComparison(FieldComparison):
 
@@ -78,8 +104,7 @@ class CategoricalFieldComparison(FieldComparison):
 
     def report(self, reporter):
         reporter.report_dataframe(self.comparison)
-        # TODO: plot Proportion of dataset vs nth most common training values
-        # filter out infrequent
+        self.compare_most_frequent(reporter)
 
 class TrainOnlyField:
 
@@ -119,11 +144,10 @@ class DatasetComparison:
         reporter.report_dataframe(self.description)
 
         for field, summary in self.fields.items():
+            logging.info(f'Reporting comparison for field {field}')
             reporter.report_heading(f'Field {field}', 2)
             summary.report(reporter)
 
-        # TODO: fields with most different distributions
-        # TODO: compare correlations to target?
         reporter.finish()
 
         logging.info('Finished reporting comparison')
@@ -152,13 +176,3 @@ if __name__ == '__main__':
 
     DatasetComparison(train_dataset, test_dataset).report(
         HtmlReporter(args.output_directory))
-
-    # TODO: adversarial validation
-    # - train tree to distinguish between train & test
-    # - then list most important features -> skewed between train & test
-    # for each feature
-    #   if categorical
-    #     compute kl divergence
-    #     new categorical values
-    #     sort by frequency in training set, then plot cdf
-    #   compare test vs train and train vs validation subset
