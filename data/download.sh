@@ -33,6 +33,11 @@ function download_kaggle_competition_files() {
 
 # Classification Datasets
 download_zip "https://archive.ics.uci.edu/static/public/2/adult.zip" census-income
+echo "age, workclass, fnlwgt, education, education-num, marital-status, occupation, relationship, race, sex, capital-gain, capital-loss, hours-per-week, native-country, income" > census-income/train.csv
+cat census-income/adult.data >> census-income/train.csv
+echo "age, workclass, fnlwgt, education, education-num, marital-status, occupation, relationship, race, sex, capital-gain, capital-loss, hours-per-week, native-country, income" > "census-income/test.csv"
+grep -E "^[0-9]+," census-income/adult.test >> "census-income/test.csv"
+
 download_kaggle_competition_files DontGetKicked
 download_kaggle_competition_files amazon-employee-access-challenge
 download_kaggle_competition_files home-credit-default-risk
@@ -43,4 +48,7 @@ download_kaggle_competition_files vsb-power-line-fault-detection
 
 # Regression Datasets
 download_kaggle_competition_files boston-housing
+
 download_tar_gz "https://www.dcc.fc.up.pt/~ltorgo/Regression/cal_housing.tgz" california-housing
+echo "longitude,latitude,housingMedianAge,totalRooms,totalBedrooms,population,households,medianIncome,medianHouseValue" > california-housing/CaliforniaHousing/data.csv
+cat california-housing/CaliforniaHousing/cal_housing.data >> california-housing/CaliforniaHousing/data.csv
