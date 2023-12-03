@@ -246,7 +246,7 @@ class DatasetSummary:
             if 'entropy' in summary.description and
             summary.description['entropy'] < threshold]
 
-def load_dataset(path, missing_header, optimize_memory=False):
+def load_dataset(path, missing_header=False, optimize_memory=False):
     logging.info('Loading dataset %s...', path)
     kwargs = {}
     if missing_header:

@@ -33,9 +33,9 @@ function download_kaggle_competition_files() {
 
 # Classification Datasets
 download_zip "https://archive.ics.uci.edu/static/public/2/adult.zip" census-income
-echo "age, workclass, fnlwgt, education, education-num, marital-status, occupation, relationship, race, sex, capital-gain, capital-loss, hours-per-week, native-country, income" > census-income/train.csv
+echo "age,workclass,fnlwgt,education,education-num,marital-status,occupation,relationship,race,sex,capital-gain,capital-loss,hours-per-week,native-country,income" > census-income/train.csv
 cat census-income/adult.data >> census-income/train.csv
-echo "age, workclass, fnlwgt, education, education-num, marital-status, occupation, relationship, race, sex, capital-gain, capital-loss, hours-per-week, native-country, income" > "census-income/test.csv"
+echo "age,workclass,fnlwgt,education,education-num,marital-status,occupation,relationship,race,sex,capital-gain,capital-loss,hours-per-week,native-country,income" > "census-income/test.csv"
 grep -E "^[0-9]+," census-income/adult.test >> "census-income/test.csv"
 
 download_kaggle_competition_files DontGetKicked
