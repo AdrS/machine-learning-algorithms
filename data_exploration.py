@@ -246,7 +246,8 @@ class DatasetSummary:
             if 'entropy' in summary.description and
             summary.description['entropy'] < threshold]
 
-def load_dataset(path, missing_header=False, optimize_memory=False):
+def load_dataset(path, missing_header=False, optimize_memory=False,
+        sample_size=None, seed=2024):
     logging.info('Loading dataset %s...', path)
     kwargs = {}
     if missing_header:
@@ -262,6 +263,8 @@ def load_dataset(path, missing_header=False, optimize_memory=False):
         del partial_dataset
 
     dataset = pd.read_csv(path, **kwargs)
+    if sample_size is not None:
+        dataset = dataset.sample(sample_size, random_state=seed)
     set_categorical_fields(dataset)
     logging.info('Finished loading')
     return dataset
@@ -280,6 +283,8 @@ if __name__ == '__main__':
     parser.add_argument('--target_value',
         help='Name of the column in the dataset with the target class label.'+
         'Set this flag for regression problems.')
+    parser.add_argument('--sample_size', type=int,
+        help='Size of a random sample of the data to explore.')
 
     parser.add_argument('--missing_header', action='store_true',
         help='Whether the first line of the CSV file is the header')
@@ -294,6 +299,6 @@ if __name__ == '__main__':
         shutil.rmtree(args.output_directory)
     os.makedirs(args.output_directory, exist_ok=True)
     dataset = load_dataset(args.dataset, args.missing_header,
-        args.optimize_memory)
+        args.optimize_memory, sample_size=args.sample_size)
     DatasetSummary(dataset, args.class_label, args.target_value).report(
         HtmlReporter(args.output_directory))
