@@ -45,6 +45,7 @@ download_kaggle_competition_files santander-customer-transaction-prediction
 download_kaggle_competition_files ieee-fraud-detection
 download_kaggle_competition_files microsoft-malware-prediction
 download_kaggle_competition_files vsb-power-line-fault-detection
+download_kaggle_competition_files playground-series-s4e1
 
 # Regression Datasets
 download_kaggle_competition_files boston-housing

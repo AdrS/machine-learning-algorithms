@@ -12,6 +12,7 @@ Datasets for benchmarking model performance on tabular data.
 -    [IEEE-CIS Fraud Detection](https://www.kaggle.com/competitions/ieee-fraud-detection/data)
 -    [Microsoft Malware Prediction](https://www.kaggle.com/competitions/microsoft-malware-prediction/data)
 -    [VSB Power Line Fault Detection](https://www.kaggle.com/competitions/vsb-power-line-fault-detection/data)
+-    [Binary Classification with a Bank Churn Dataset](https://www.kaggle.com/competitions/playground-series-s4e1/data)
 
 ## Regression
 
@@ -23,4 +24,4 @@ Datasets for benchmarking model performance on tabular data.
 -    Create a Kaggle account and install the [Kaggle
 CLI](https://www.kaggle.com/docs/api).
 
--    Run `download.sh` in the same directory as the readme.
+-    Run `download.sh` in the same directory as the README.
