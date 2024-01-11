@@ -1,3 +1,4 @@
+import itertools
 import numpy as np
 import pandas as pd
 from collections import defaultdict
@@ -9,9 +10,51 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.svm import LinearSVC, SVC
+from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
+from sklearn.svm import SVC
 from sklearn.inspection import permutation_importance
+
+def list_pairs(elements):
+    'Returns a list of all unique pairs of elements'
+    return itertools.combinations(elements, 2)
+
+class FeatureEngineer:
+    def __init__(self, numerical_features=[], log=True, square=True, cube=True,
+            categorical_features=[], pairs=True):
+        self.numerical_features = numerical_features
+        self.log = log
+        self.square = square
+        self.cube = cube
+        self.engineered_numerical_features = []
+        for feature in numerical_features:
+            if log:
+                self.engineered_numerical_features.append(f'log({feature})')
+            if square:
+                self.engineered_numerical_features.append(f'{feature}^2')
+            if cube:
+                self.engineered_numerical_features.append(f'{feature}^3')
+
+        self.categorical_features = categorical_features
+        self.pairs = pairs
+        self.engineered_categorical_features = []
+        if pairs:
+            for (f1, f2) in list_pairs(categorical_features):
+                self.engineered_categorical_features.append(f'({f1}, {f2})')
+
+    def __call__(self, X):
+        for feature in self.numerical_features:
+            if self.log:
+                X[f'log({feature})'] = 0
+                mask = X[feature] + 1 > 0
+                X[f'log({feature})'] = np.log(X[feature][mask] + 1)
+            if self.square:
+                X[f'{feature}^2'] = X[feature]**2
+            if self.cube:
+                X[f'{feature}^3'] = X[feature]**3
+        if self.pairs:
+            for (f1, f2) in list_pairs(self.categorical_features):
+                X[f'({f1}, {f2})'] = [hash(t) for t in zip(X[f1], X[f2])]
+        return X
 
 def most_important_features(model, X_val, Y_val, preprocess):
     pipeline = Pipeline([('preprocess', preprocess), ('model', model)])
@@ -32,10 +75,30 @@ if __name__ == '__main__':
     binary_features = ['HasCrCard', 'IsActiveMember'] 
     categorical_features = ['Geography', 'Gender']
 
-    preprocess = ColumnTransformer([
+    feature_engineer = FunctionTransformer(FeatureEngineer(
+        numerical_features=numerical_features,
+        log=True,
+        square=True,
+        cube=True,
+        categorical_features=categorical_features + binary_features,
+        pairs=True))
+
+    def list_numerical_features():
+        return numerical_features +\
+            feature_engineer.func.engineered_numerical_features
+
+    def list_categorical_features():
+        return categorical_features + binary_features + \
+            feature_engineer.func.engineered_categorical_features
+
+    column_transformer = ColumnTransformer([
         ('Categorical', OneHotEncoder(drop='if_binary'),
-            categorical_features + binary_features),
-        ('Numerical', StandardScaler(), numerical_features)
+            list_categorical_features()),
+        ('Numerical', StandardScaler(), list_numerical_features())
+    ])
+    preprocess = Pipeline([
+        ('Feature engineer', feature_engineer),
+        ('Column', column_transformer)
     ])
 
     train_dataset = pd.read_csv(train_path)
@@ -47,6 +110,7 @@ if __name__ == '__main__':
     # Cache the preprocessed training data
     X_train_post_processed = preprocess.fit_transform(X_train)
     X_val_post_processed = preprocess.transform(X_val)
+    X_val_feature_engineered = feature_engineer.transform(X_val)
 
     # Try different families of models as a first pass
     classifiers = [
@@ -65,7 +129,7 @@ if __name__ == '__main__':
         score = roc_auc_score(Y_val, predictions[:, 1])
         print('Score (roc_auc):', score)
         print('Most important features (permutation importance):')
-        print(most_important_features(classifier, X_val, Y_val, preprocess))
+        print(most_important_features(classifier, X_val_feature_engineered, Y_val, column_transformer))
         print('\n')
 
     # Select the best and run hyper parameter searches
