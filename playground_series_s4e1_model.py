@@ -1,7 +1,6 @@
 import itertools
 import numpy as np
 import pandas as pd
-from collections import defaultdict
 from functools import reduce
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier, RandomForestClassifier
@@ -56,9 +55,8 @@ class FeatureEngineer:
                 X[f'({f1}, {f2})'] = [hash(t) for t in zip(X[f1], X[f2])]
         return X
 
-def most_important_features(model, X_val, Y_val, preprocess):
-    pipeline = Pipeline([('preprocess', preprocess), ('model', model)])
-    r = permutation_importance(pipeline, X_val, Y_val, scoring='roc_auc')
+def most_important_features(model, X_val, Y_val, **kwargs):
+    r = permutation_importance(model, X_val, Y_val, **kwargs)
     return pd.DataFrame({
         'mean':r.importances_mean,
         'std':r.importances_std},
@@ -74,7 +72,9 @@ if __name__ == '__main__':
         'NumOfProducts', 'EstimatedSalary']
     binary_features = ['HasCrCard', 'IsActiveMember'] 
     categorical_features = ['Geography', 'Gender']
+    scoring = 'roc_auc'
 
+    # Feature engineering
     feature_engineer = FunctionTransformer(FeatureEngineer(
         numerical_features=numerical_features,
         log=True,
@@ -96,10 +96,6 @@ if __name__ == '__main__':
             list_categorical_features()),
         ('Numerical', StandardScaler(), list_numerical_features())
     ])
-    preprocess = Pipeline([
-        ('Feature engineer', feature_engineer),
-        ('Column', column_transformer)
-    ])
 
     train_dataset = pd.read_csv(train_path)
     Y = train_dataset[target]
@@ -107,13 +103,13 @@ if __name__ == '__main__':
 
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2,
                                         random_state=seed)
-    # Cache the preprocessed training data
-    X_train_post_processed = preprocess.fit_transform(X_train)
-    X_val_post_processed = preprocess.transform(X_val)
-    X_val_feature_engineered = feature_engineer.transform(X_val)
 
-    # Try different families of models as a first pass
-    classifiers = [
+    # Cache the preprocessed training data
+    X_train_all_features = feature_engineer.fit_transform(X_train)
+    X_val_all_features = feature_engineer.fit_transform(X_val)
+
+    # Model family selection
+    models = [
         LogisticRegression(),
         MLPClassifier(),
         AdaBoostClassifier(),
@@ -121,15 +117,24 @@ if __name__ == '__main__':
         GradientBoostingClassifier(),
         SVC(),
     ]
-    for classifier in classifiers:
-        print('Fitting classifier:', classifier)
-        classifier.fit(X_train_post_processed, Y_train)
+    for model in models:
+        model_pipeline = Pipeline([
+            ('Column transform', column_transformer),
+            ('Model', model)
+        ])
+        print('Evaluating model family:', model)
+        # TODO: feature selection
+        X_train_features = X_train_all_features
+        X_val_features = X_val_all_features
 
-        predictions = classifier.predict_proba(X_val_post_processed)
+        model_pipeline.fit(X_train_features, Y_train)
+
+        predictions = model_pipeline.predict_proba(X_val_features)
+        # TODO: use get_scorer
         score = roc_auc_score(Y_val, predictions[:, 1])
         print('Score (roc_auc):', score)
         print('Most important features (permutation importance):')
-        print(most_important_features(classifier, X_val_feature_engineered, Y_val, column_transformer))
-        print('\n')
+        print(most_important_features(model_pipeline, X_val_features, Y_val,
+            scoring=scoring))
 
     # Select the best and run hyper parameter searches
