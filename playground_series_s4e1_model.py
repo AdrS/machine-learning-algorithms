@@ -1,3 +1,4 @@
+import argparse
 import itertools
 import numpy as np
 import pandas as pd
@@ -76,32 +77,53 @@ def print_evaluation(model, X, Y):
             columns=[f'Predicted: {i}' for i in [False, True]]))
 
 if __name__ == '__main__':
-    # TODO: refactor into a library to use for other datasets
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--train_data',
+        help='Path to a CSV file containing the dataset',
+        default='data/playground-series-s4e1/train.csv')
+    parser.add_argument('--target',
+        help='Name of the target column',
+        default='Exited')
+    parser.add_argument('--dropped_features', nargs='+',
+        help='List of columns for features to drop before training',
+        default=['id', 'CustomerId', 'Surname'])
+    parser.add_argument('--numerical_features', nargs='+',
+        help='List of columns for numerical features',
+        default=['CreditScore', 'Age', 'Tenure', 'Balance',
+        'NumOfProducts', 'EstimatedSalary'])
+    parser.add_argument('--categorical_features', nargs='+',
+        help='List of columns for categorical features',
+        default=['Geography', 'Gender', 'HasCrCard', 'IsActiveMember'])
+    parser.add_argument('--model_families', nargs='+',
+        help='List of model families to try as a first pass',
+        default=[
+            'LogisticRegression',
+            'MLPClassifier',
+            'AdaBoostClassifier',
+            'RandomForestClassifier',
+            'GradientBoostingClassifier',
+            'SVC'
+        ])
+    args = parser.parse_args()
+
     seed = 2024
-    train_path = 'data/playground-series-s4e1/train.csv'
-    target = 'Exited'
-    dropped_features = ['id', 'CustomerId', 'Surname']
-    numerical_features = ['CreditScore', 'Age', 'Tenure', 'Balance',
-        'NumOfProducts', 'EstimatedSalary']
-    binary_features = ['HasCrCard', 'IsActiveMember'] 
-    categorical_features = ['Geography', 'Gender']
     scoring = 'roc_auc'
 
     # Feature engineering
     feature_engineer = FunctionTransformer(FeatureEngineer(
-        numerical_features=numerical_features,
+        numerical_features=args.numerical_features,
         log=True,
         square=True,
         cube=True,
-        categorical_features=categorical_features + binary_features,
+        categorical_features=args.categorical_features,
         pairs=True))
 
     def list_numerical_features():
-        return numerical_features +\
+        return args.numerical_features +\
             feature_engineer.func.engineered_numerical_features
 
     def list_categorical_features():
-        return categorical_features + binary_features + \
+        return args.categorical_features + \
             feature_engineer.func.engineered_categorical_features
 
     column_transformer = ColumnTransformer([
@@ -110,9 +132,9 @@ if __name__ == '__main__':
         ('Numerical', StandardScaler(), list_numerical_features())
     ])
 
-    train_dataset = pd.read_csv(train_path)
-    Y = train_dataset[target]
-    X = train_dataset.drop(columns=[target] + dropped_features)
+    train_dataset = pd.read_csv(args.train_data)
+    Y = train_dataset[args.target]
+    X = train_dataset.drop(columns=[args.target] + args.dropped_features)
 
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2,
                                         random_state=seed)
@@ -122,20 +144,21 @@ if __name__ == '__main__':
     X_val_all_features = feature_engineer.fit_transform(X_val)
 
     # Model family selection
-    models = [
-        LogisticRegression(),
-        MLPClassifier(),
-        AdaBoostClassifier(),
-        RandomForestClassifier(),
-        GradientBoostingClassifier(),
-        SVC(),
-    ]
-    for model in models:
+    model_families = {
+        'LogisticRegression': LogisticRegression(),
+        'MLPClassifier': MLPClassifier(),
+        'AdaBoostClassifier': AdaBoostClassifier(),
+        'RandomForestClassifier': RandomForestClassifier(),
+        'GradientBoostingClassifier': GradientBoostingClassifier(),
+        'SVC': SVC(),
+    }
+    for model_family in args.model_families:
+        model = model_families[model_family]
         model_pipeline = Pipeline([
             ('Column transform', column_transformer),
             ('Model', model)
         ])
-        print('\n\nEvaluating model family:', model)
+        print('\n\nEvaluating model family:', model_family)
         # TODO: feature selection
         X_train_features = X_train_all_features
         X_val_features = X_val_all_features
