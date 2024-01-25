@@ -63,18 +63,36 @@ def most_important_features(model, X_val, Y_val, **kwargs):
         'std':r.importances_std},
         index=X_val.columns).sort_values(by=['mean'], ascending=False)
 
-def print_evaluation(model, X, Y):
-    prediction_proba = model_pipeline.predict_proba(X)
+def print_evaluation(X, Y_target, proba):
     # TODO: use get_scorer
-    score = roc_auc_score(Y, prediction_proba[:, 1])
+    score = roc_auc_score(Y_target, proba)
     print('Score (roc_auc):', score)
     threshold = 0.5
-    predictions = prediction_proba[:, 1] >= threshold
+    Y_pred = proba >= threshold
     print(f'Confusion Matrix (threshold = {threshold}):')
     print(pd.DataFrame(
-            confusion_matrix(Y, predictions, normalize='all'),
+            confusion_matrix(Y_target, Y_pred, normalize='all'),
             index=[f'Actual: {i}' for i in [False, True]],
             columns=[f'Predicted: {i}' for i in [False, True]]))
+
+def subcategory_evaluation(X, Y_target, proba, categorical_features):
+    '''
+    Compare the model performance for different subcategories to identify
+    classes of input the model performs poorly on.
+    '''
+    for feature in categorical_features:
+        print(f'\n\nEvaluation for {feature} values:')
+        # TODO: sort values by score
+        for value in np.sort(X_train[feature].unique()):
+            print('\nValue:', value)
+            indicies = X[feature] == value
+            X_subset = X[indicies]
+            Y_target_subset = Y_target[indicies]
+            proba_subset = proba[indicies]
+            print_evaluation(X[indicies], Y_target[indicies], proba[indicies])
+    # TODO: for numerical features look at correlation between feature value
+    # and output score
+    # TODO: filter to only show poorly performing subcategories
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -104,6 +122,10 @@ if __name__ == '__main__':
             'GradientBoostingClassifier',
             'SVC'
         ])
+    parser.add_argument('--subcategory_evaluation', action='store_true',
+        help='Evaluate model performance for subcategories of the input')
+    parser.add_argument('--feature_importance', action='store_true',
+        help='Evaluate feature importance using permutation importance')
     args = parser.parse_args()
 
     seed = 2024
@@ -165,14 +187,26 @@ if __name__ == '__main__':
 
         model_pipeline.fit(X_train_features, Y_train)
 
+        proba_train = model_pipeline.predict_proba(X_train_features)[:, 1]
+        proba_val = model_pipeline.predict_proba(X_val_features)[:, 1]
+
         print('Training scores:')
-        print_evaluation(model_pipeline, X_train_features, Y_train)
+        print('-'*80)
+        print_evaluation(X_train_features, Y_train, proba_train)
+        if args.subcategory_evaluation:
+            subcategory_evaluation(X_val_features, Y_val, proba_val,
+                list_categorical_features())
 
         print('\nValidation scores:')
-        print_evaluation(model_pipeline, X_val_features, Y_val)
+        print('-'*80)
+        print_evaluation(X_val_features, Y_val, proba_val)
+        if args.subcategory_evaluation:
+            subcategory_evaluation(X_val_features, Y_val, proba_val,
+                list_categorical_features())
 
-        print('\nMost important features (permutation importance):')
-        print(most_important_features(model_pipeline, X_val_features, Y_val,
-            scoring=scoring))
+        if args.feature_importance:
+            print('\nMost important features (permutation importance):')
+            print(most_important_features(model_pipeline, X_val_features, Y_val,
+                scoring=scoring))
 
     # Select the best and run hyper parameter searches
