@@ -99,6 +99,9 @@ if __name__ == '__main__':
     parser.add_argument('--train_data',
         help='Path to a CSV file containing the dataset',
         default='data/playground-series-s4e1/train.csv')
+    parser.add_argument('--train_size', type=int,
+        help='Amount of the data to train on during model exploration.' +
+            'Use this to speed up the exploration of different models.')
     parser.add_argument('--target',
         help='Name of the target column',
         default='Exited')
@@ -161,18 +164,22 @@ if __name__ == '__main__':
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2,
                                         random_state=seed)
 
+    if args.train_size is not None and args.train_size < len(X_train):
+        X_train = X_train[:args.train_size]
+        Y_train = Y_train[:args.train_size]
+
     # Cache the preprocessed training data
     X_train_all_features = feature_engineer.fit_transform(X_train)
     X_val_all_features = feature_engineer.fit_transform(X_val)
 
     # Model family selection
     model_families = {
-        'LogisticRegression': LogisticRegression(),
-        'MLPClassifier': MLPClassifier(),
-        'AdaBoostClassifier': AdaBoostClassifier(),
-        'RandomForestClassifier': RandomForestClassifier(),
-        'GradientBoostingClassifier': GradientBoostingClassifier(),
-        'SVC': SVC(),
+        'LogisticRegression': LogisticRegression(random_state=seed),
+        'MLPClassifier': MLPClassifier(random_state=seed),
+        'AdaBoostClassifier': AdaBoostClassifier(random_state=seed),
+        'RandomForestClassifier': RandomForestClassifier(random_state=seed),
+        'GradientBoostingClassifier': GradientBoostingClassifier(random_state=seed),
+        'SVC': SVC(random_state=seed, probability=True),
     }
     for model_family in args.model_families:
         model = model_families[model_family]
