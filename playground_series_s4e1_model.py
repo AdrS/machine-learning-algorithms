@@ -2,6 +2,7 @@ import argparse
 import itertools
 import numpy as np
 import pandas as pd
+from catboost import CatBoostClassifier
 from functools import reduce
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier, RandomForestClassifier
@@ -10,7 +11,7 @@ from sklearn.metrics import roc_auc_score, confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
+from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, OrdinalEncoder, StandardScaler
 from sklearn.svm import SVC
 from sklearn.inspection import permutation_importance
 
@@ -151,12 +152,6 @@ if __name__ == '__main__':
         return args.categorical_features + \
             feature_engineer.func.engineered_categorical_features
 
-    column_transformer = ColumnTransformer([
-        ('Categorical', OneHotEncoder(drop='if_binary'),
-            list_categorical_features()),
-        ('Numerical', StandardScaler(), list_numerical_features())
-    ])
-
     train_dataset = pd.read_csv(args.train_data)
     Y = train_dataset[args.target]
     X = train_dataset.drop(columns=[args.target] + args.dropped_features)
@@ -178,15 +173,41 @@ if __name__ == '__main__':
         'MLPClassifier': MLPClassifier(random_state=seed),
         'AdaBoostClassifier': AdaBoostClassifier(random_state=seed),
         'RandomForestClassifier': RandomForestClassifier(random_state=seed),
-        'GradientBoostingClassifier': GradientBoostingClassifier(random_state=seed),
+        'GradientBoostingClassifier': GradientBoostingClassifier(
+            random_state=seed),
         'SVC': SVC(random_state=seed, probability=True),
+        'CatBoostClassifier': CatBoostClassifier(
+            # TODO: Set cat_features
+            random_seed=seed, logging_level="Silent"),
+    }
+    tree_models = {
+        'AdaBoostClassifier',
+        'RandomForestClassifier',
+        'GradientBoostingClassifier',
+        'CatBoostClassifier'
     }
     for model_family in args.model_families:
         model = model_families[model_family]
+
+        # Decision tree models perform better without one-hot encoding and are
+        # invariant to scaling of numerical features.
+        if model_family in tree_models:
+            column_transformer = ColumnTransformer([
+                ('Categorical', OrdinalEncoder(), list_categorical_features()),
+                ('Numerical', 'passthrough', list_numerical_features())
+            ])
+        else:
+            column_transformer = ColumnTransformer([
+                ('Categorical', OneHotEncoder(drop='if_binary'),
+                    list_categorical_features()),
+                ('Numerical', StandardScaler(), list_numerical_features())
+            ])
+
         model_pipeline = Pipeline([
             ('Column transform', column_transformer),
             ('Model', model)
         ])
+
         print('\n\nEvaluating model family:', model_family)
         # TODO: feature selection
         X_train_features = X_train_all_features
