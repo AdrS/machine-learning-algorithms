@@ -1,7 +1,10 @@
 import argparse
 import itertools
+import joblib
 import numpy as np
+import os
 import pandas as pd
+import pathlib
 from catboost import CatBoostClassifier
 from functools import reduce
 from sklearn.compose import ColumnTransformer
@@ -24,10 +27,27 @@ def parse_datatype_overrides(overrides):
     return datatype_overrides
 
 def load_dataset(path, datatype_overrides):
-    dataset = pd.read_csv(path)
+    dataset = pd.read_csv(path, index_col=False)
     for column, dtype in datatype_overrides:
         dataset[[column]] = dataset[[column]].astype(dtype)
     return dataset
+
+def save_model(output_directory, model_name, model):
+    model_path = os.path.join(output_directory, model_name + '.joblib')
+    pathlib.Path(output_directory).mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, model_path)
+
+def save_predictions(output_directory, name,
+        X=None, proba=None, proba_column_name=None, Y_target=None):
+    path = os.path.join(output_directory, name + '.csv')
+    objs = []
+    if X is not None:
+        objs.append(X.reset_index(drop=True))
+    if proba is not None:
+        objs.append(pd.DataFrame({proba_column_name:proba}))
+    if Y_target is not None:
+        objs.append(Y_target.reset_index(drop=True))
+    pd.concat(objs, axis=1).to_csv(path, header=True, index=False)
 
 def list_pairs(elements):
     'Returns a list of all unique pairs of elements'
@@ -117,6 +137,9 @@ if __name__ == '__main__':
     parser.add_argument('--train_size', type=int,
         help='Amount of the data to train on during model exploration.' +
             'Use this to speed up the exploration of different models.')
+    parser.add_argument('--output',
+        help='Path to the directory to save models and evaluation results',
+        default='output/playground-series-s4e1/')
     parser.add_argument('--target',
         help='Name of the target column',
         default='Exited')
@@ -141,7 +164,8 @@ if __name__ == '__main__':
             'AdaBoostClassifier',
             'RandomForestClassifier',
             'GradientBoostingClassifier',
-            'SVC'
+            'SVC',
+            'CatBoostClassifier',
         ])
     parser.add_argument('--subcategory_evaluation', action='store_true',
         help='Evaluate model performance for subcategories of the input')
@@ -206,6 +230,7 @@ if __name__ == '__main__':
         'CatBoostClassifier'
     }
     for model_family in args.model_families:
+        # TODO: save construction hyperparameters
         model = model_families[model_family]
         steps = []
 
@@ -238,10 +263,20 @@ if __name__ == '__main__':
         X_train_features = X_train_all_features
         X_val_features = X_val_all_features
 
+        # TODO: save training hyper-parameters
         model_pipeline.fit(X_train_features, Y_train)
+        save_model(args.output, model_family, model_pipeline)
 
         proba_train = model_pipeline.predict_proba(X_train_features)[:, 1]
         proba_val = model_pipeline.predict_proba(X_val_features)[:, 1]
+        save_predictions(args.output, model_family + '_train_predictions',
+            X=X_train_features[args.numerical_features + args.categorical_features],
+            proba=proba_train, proba_column_name='proba',
+            Y_target=Y_train)
+        save_predictions(args.output, model_family + '_val_predictions',
+            X=X_val_features[args.numerical_features + args.categorical_features],
+            proba=proba_val, proba_column_name='proba',
+            Y_target=Y_val)
 
         print('Training scores:')
         print('-'*80)
@@ -261,5 +296,6 @@ if __name__ == '__main__':
             print('\nMost important features (permutation importance):')
             print(most_important_features(model_pipeline, X_val_features, Y_val,
                 scoring=scoring))
+        # TODO: save evaluation metrics
 
     # Select the best and run hyper parameter searches
