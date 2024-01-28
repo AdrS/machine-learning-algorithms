@@ -15,6 +15,20 @@ from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, OrdinalEnc
 from sklearn.svm import SVC
 from sklearn.inspection import permutation_importance
 
+def parse_datatype_overrides(overrides):
+    # TODO: input validation
+    datatype_overrides = []
+    for override in overrides:
+        column, dtype = override.split('=')
+        datatype_overrides.append((column, dtype))
+    return datatype_overrides
+
+def load_dataset(path, datatype_overrides):
+    dataset = pd.read_csv(path)
+    for column, dtype in datatype_overrides:
+        dataset[[column]] = dataset[[column]].astype(dtype)
+    return dataset
+
 def list_pairs(elements):
     'Returns a list of all unique pairs of elements'
     return itertools.combinations(elements, 2)
@@ -109,13 +123,16 @@ if __name__ == '__main__':
     parser.add_argument('--dropped_features', nargs='+',
         help='List of columns for features to drop before training',
         default=['id', 'CustomerId', 'Surname'])
-    parser.add_argument('--numerical_features', nargs='+',
+    parser.add_argument('--numerical_features', nargs='*',
         help='List of columns for numerical features',
         default=['CreditScore', 'Age', 'Tenure', 'Balance',
         'NumOfProducts', 'EstimatedSalary'])
-    parser.add_argument('--categorical_features', nargs='+',
+    parser.add_argument('--categorical_features', nargs='*',
         help='List of columns for categorical features',
         default=['Geography', 'Gender', 'HasCrCard', 'IsActiveMember'])
+    parser.add_argument('--datatype_overrides', nargs='*',
+        help='Override the inferred datatypes for the columns',
+        default=['HasCrCard=int64', 'IsActiveMember=int64'])
     parser.add_argument('--model_families', nargs='+',
         help='List of model families to try as a first pass',
         default=[
@@ -152,7 +169,9 @@ if __name__ == '__main__':
         return args.categorical_features + \
             feature_engineer.func.engineered_categorical_features
 
-    train_dataset = pd.read_csv(args.train_data)
+    train_dataset = load_dataset(args.train_data,
+        parse_datatype_overrides(args.datatype_overrides))
+
     Y = train_dataset[args.target]
     X = train_dataset.drop(columns=[args.target] + args.dropped_features)
 
@@ -177,7 +196,7 @@ if __name__ == '__main__':
             random_state=seed),
         'SVC': SVC(random_state=seed, probability=True),
         'CatBoostClassifier': CatBoostClassifier(
-            # TODO: Set cat_features
+            cat_features=list_categorical_features(),
             random_seed=seed, logging_level="Silent"),
     }
     tree_models = {
@@ -188,25 +207,31 @@ if __name__ == '__main__':
     }
     for model_family in args.model_families:
         model = model_families[model_family]
+        steps = []
 
         # Decision tree models perform better without one-hot encoding and are
         # invariant to scaling of numerical features.
-        if model_family in tree_models:
-            column_transformer = ColumnTransformer([
+        if model_family == 'CatBoostClassifier':
+            # https://catboost.ai/en/docs/concepts/faq#why-float-and-nan-values-are-forbidden-for-cat-features
+            # Categorical features must have integer or string datatypes. Use
+            # the --datatype_overrides flag to cast the column datatypes as
+            # needed.
+            pass
+        elif model_family in tree_models:
+            steps.append(('Column transform',
+                ColumnTransformer([
                 ('Categorical', OrdinalEncoder(), list_categorical_features()),
                 ('Numerical', 'passthrough', list_numerical_features())
-            ])
+            ])))
         else:
-            column_transformer = ColumnTransformer([
+            steps.append(('Column transform',
+                ColumnTransformer([
                 ('Categorical', OneHotEncoder(drop='if_binary'),
                     list_categorical_features()),
                 ('Numerical', StandardScaler(), list_numerical_features())
-            ])
-
-        model_pipeline = Pipeline([
-            ('Column transform', column_transformer),
-            ('Model', model)
-        ])
+            ])))
+        steps.append(('Model', model))
+        model_pipeline = Pipeline(steps)
 
         print('\n\nEvaluating model family:', model_family)
         # TODO: feature selection
