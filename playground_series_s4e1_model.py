@@ -7,6 +7,7 @@ import pandas as pd
 from catboost import CatBoostClassifier
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier, RandomForestClassifier
+from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, confusion_matrix
 from sklearn.model_selection import train_test_split
@@ -14,7 +15,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, OrdinalEncoder, StandardScaler
 from sklearn.svm import SVC
-from sklearn.inspection import permutation_importance
+from sklearn.utils import shuffle
 
 def parse_datatype_overrides(overrides):
     # TODO: input validation
@@ -257,8 +258,12 @@ def do_training_runs(args, feature_engineer, all_numerical_features,
     Y = train_dataset[args.target]
     X = train_dataset[args.numerical_features + args.categorical_features]
 
-    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2,
-                                        random_state=seed)
+    use_validation_set = args.val_fraction > 0.0
+    if use_validation_set:
+        X_train, X_val, Y_train, Y_val = train_test_split(X, Y,
+            test_size=args.val_fraction, random_state=seed)
+    else:
+        X_train, Y_train = shuffle(X, Y, random_state=seed)
 
     if args.train_size is not None and args.train_size < len(X_train):
         X_train = X_train[:args.train_size]
@@ -266,7 +271,8 @@ def do_training_runs(args, feature_engineer, all_numerical_features,
 
     # Cache the preprocessed training data
     X_train_all_features = feature_engineer.fit_transform(X_train)
-    X_val_all_features = feature_engineer.fit_transform(X_val)
+    if use_validation_set:
+        X_val_all_features = feature_engineer.fit_transform(X_val)
 
     # TODO: feature selection
 
@@ -279,14 +285,16 @@ def do_training_runs(args, feature_engineer, all_numerical_features,
                 'categorical_features': all_categorical_features,
                 'numerical_features': all_numerical_features,
                 'train_size':args.train_size,
+                'val_fraction':args.val_fraction,
             }
             log_params(params)
             model_pipeline = create_model_pipeline(params)
 
             X_train_features = X_train_all_features
-            X_val_features = X_val_all_features
-            log_data(X_train_all_features, Y_train, 'training')
-            log_data(X_val_all_features, Y_val, 'validation')
+            log_data(X_train_all_features, Y_train, 'train')
+            if use_validation_set:
+                X_val_features = X_val_all_features
+                log_data(X_val_all_features, Y_val, 'val')
 
             model_pipeline.fit(X_train_features, Y_train)
             log_model(model_pipeline)
@@ -294,9 +302,10 @@ def do_training_runs(args, feature_engineer, all_numerical_features,
             proba_train = model_pipeline.predict_proba(X_train_features)[:, 1]
             log_performance(evaluate_performance(Y_train, proba_train),
                 metric_suffix='train')
-            proba_val = model_pipeline.predict_proba(X_val_features)[:, 1]
-            log_performance(evaluate_performance(Y_val, proba_val),
-                metric_suffix='val')
+            if use_validation_set:
+                proba_val = model_pipeline.predict_proba(X_val_features)[:, 1]
+                log_performance(evaluate_performance(Y_val, proba_val),
+                    metric_suffix='val')
 
             if args.subcategory_evaluation:
                 log_subcategory_performance(
@@ -332,6 +341,10 @@ if __name__ == '__main__':
     parser.add_argument('--train_size', type=int,
         help='Amount of the data to train on during model exploration.' +
             'Use this to speed up the exploration of different models.')
+    parser.add_argument('--val_fraction', type=float,
+        help='Fraction of training data used for the validation set.' +
+            'Set to 0 to use all data for training and none for validation.',
+            default=0.2)
 
     parser.add_argument('--inference_model',
         help='Run id of the model to use for inference')
