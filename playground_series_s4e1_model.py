@@ -1,12 +1,10 @@
 import argparse
 import itertools
-import joblib
+import json
+import mlflow
 import numpy as np
-import os
 import pandas as pd
-import pathlib
 from catboost import CatBoostClassifier
-from functools import reduce
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -31,23 +29,6 @@ def load_dataset(path, datatype_overrides):
     for column, dtype in datatype_overrides:
         dataset[[column]] = dataset[[column]].astype(dtype)
     return dataset
-
-def save_model(output_directory, model_name, model):
-    model_path = os.path.join(output_directory, model_name + '.joblib')
-    pathlib.Path(output_directory).mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, model_path)
-
-def save_predictions(output_directory, name,
-        X=None, proba=None, proba_column_name=None, Y_target=None):
-    path = os.path.join(output_directory, name + '.csv')
-    objs = []
-    if X is not None:
-        objs.append(X.reset_index(drop=True))
-    if proba is not None:
-        objs.append(pd.DataFrame({proba_column_name:proba}))
-    if Y_target is not None:
-        objs.append(Y_target.reset_index(drop=True))
-    pd.concat(objs, axis=1).to_csv(path, header=True, index=False)
 
 def list_pairs(elements):
     'Returns a list of all unique pairs of elements'
@@ -91,43 +72,172 @@ class FeatureEngineer:
                 X[f'({f1}, {f2})'] = [hash(t) for t in zip(X[f1], X[f2])]
         return X
 
-def most_important_features(model, X_val, Y_val, **kwargs):
+def create_model_pipeline(params):
+    model_family = params['model_family']
+    seed = params['seed']
+    categorical_features = params['categorical_features']
+    numerical_features = params['numerical_features']
+
+    steps = []
+
+    # Preprocessing
+    ###########################################################################
+    tree_models = {
+        'AdaBoostClassifier',
+        'RandomForestClassifier',
+        'GradientBoostingClassifier',
+        'CatBoostClassifier'
+    }
+    # Decision tree models perform better without one-hot encoding and are
+    # invariant to scaling of numerical features.
+    if model_family == 'CatBoostClassifier':
+        # https://catboost.ai/en/docs/concepts/faq#why-float-and-nan-values-are-forbidden-for-cat-features
+        # Categorical features must have integer or string datatypes. Use
+        # the --datatype_overrides flag to cast the column datatypes as
+        # needed.
+        pass
+    elif model_family in tree_models:
+        steps.append(('Column transform',
+            ColumnTransformer([
+            ('Categorical', OrdinalEncoder(), categorical_features),
+            ('Numerical', 'passthrough', numerical_features)
+        ])))
+    else:
+        steps.append(('Column transform',
+            ColumnTransformer([
+            ('Categorical', OneHotEncoder(drop='if_binary'),
+                list_categorical_features()),
+            ('Numerical', StandardScaler(), list_numerical_features())
+        ])))
+
+    # Model
+    ###########################################################################
+    if model_family == 'LogisticRegression':
+        model = LogisticRegression(random_state=seed)
+    elif model_family == 'MLPClassifier':
+        model = MLPClassifier(random_state=seed)
+    elif model_family == 'AdaBoostClassifier':
+        model = AdaBoostClassifier(random_state=seed)
+    elif model_family == 'RandomForestClassifier':
+        model = RandomForestClassifier(random_state=seed)
+    elif model_family == 'GradientBoostingClassifier':
+        model = GradientBoostingClassifier(random_state=seed)
+    elif model_family == 'SVC':
+        model = SVC(random_state=seed, probability=True)
+    elif model_family == 'CatBoostClassifier':
+        model = CatBoostClassifier(
+            cat_features=categorical_features,
+            random_seed=seed, logging_level="Silent")
+    steps.append(('Model', model))
+
+    return Pipeline(steps)
+
+# From: https://stackoverflow.com/questions/26646362
+class NumpyEncoder(json.JSONEncoder):
+
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return json.JSONEncoder.default(self, obj)
+
+def pp(obj):
+    return json.dumps(obj, sort_keys=True, indent=2, cls=NumpyEncoder)
+
+def log_params(params, enable_mlflow=True, enable_stdout=True):
+    if enable_stdout:
+        print('Model:', pp(params))
+    if enable_mlflow:
+        mlflow.log_params(params)
+
+def log_data(X, Y, label, enable_mlflow=True):
+    if not enable_mlflow:
+        return
+    mlflow.log_input(
+        mlflow.data.from_pandas(pd.concat([X, Y], axis=1)),
+        context=label)
+
+def log_model(model, enable_mlflow=True):
+    if not enable_mlflow:
+        return
+    mlflow.sklearn.log_model(model, 'model')
+    #mlflow.catboost.log_model(model, 'model')
+
+def evaluate_performance(Y_target, proba):
+    threshold = 0.5
+    Y_pred = proba >= threshold
+    cm = confusion_matrix(Y_target, Y_pred, normalize='all')
+    return {
+        'roc_auc':roc_auc_score(Y_target, proba),
+        'cm':cm
+    }
+
+def log_performance(metrics,
+        enable_mlflow=True, metric_suffix='',
+        enable_stdout=True):
+    roc_auc = metrics['roc_auc']
+    if enable_mlflow:
+        mlflow.log_metric(f'{metric_suffix}_roc_auc', roc_auc)
+        mlflow.log_text(json.dumps(metrics['cm'], cls=NumpyEncoder),
+            artifact_file=f'{metric_suffix}_confusion_matrix.json')
+    if enable_stdout:
+        print(metric_suffix, 'roc auc:', roc_auc)
+        print('Confusion matrix:', metrics['cm'])
+
+def evaluate_subcategory_performance(X, Y_target, proba, categorical_features):
+    '''
+    Compare the model performance for different subcategories to identify
+    classes of input the model performs poorly on.
+    '''
+    metrics = []
+    for feature in categorical_features:
+        metrics_by_value = []
+        for value in np.sort(X_train[feature].unique()):
+            indicies = X[feature] == value
+            Y_target_subset = Y_target[indicies]
+            proba_subset = proba[indicies]
+            value_metrics = evaluate_performance(Y_target_subset, proba_subset)
+            value_metrics['value'] = value
+            metrics_by_value.append(value_metrics)
+        metrics_by_value.sort(key=lambda x: x['roc_auc'])
+        feature_metrics = {
+            'feature':feature,
+            'values':metrics_by_value
+        }
+        metrics.append(feature_metrics)
+    # TODO: for numerical features look at correlation between feature value
+    # and output score
+    return metrics
+
+
+def log_subcategory_performance(metrics,
+        enable_mlflow=True, metric_suffix='',
+        enable_stdout=True):
+    if enable_mlflow:
+        mlflow.log_text(json.dumps(metrics, cls=NumpyEncoder),
+            'subcategory_performance.json')
+    if enable_stdout:
+        # TODO: filter to only show poorly performing subcategories
+        print('Subcategory performance:', pp(metrics))
+    
+def evaluate_feature_importance(model, X_val, Y_val, **kwargs):
     r = permutation_importance(model, X_val, Y_val, **kwargs)
     return pd.DataFrame({
         'mean':r.importances_mean,
         'std':r.importances_std},
         index=X_val.columns).sort_values(by=['mean'], ascending=False)
 
-def print_evaluation(X, Y_target, proba):
-    # TODO: use get_scorer
-    score = roc_auc_score(Y_target, proba)
-    print('Score (roc_auc):', score)
-    threshold = 0.5
-    Y_pred = proba >= threshold
-    print(f'Confusion Matrix (threshold = {threshold}):')
-    print(pd.DataFrame(
-            confusion_matrix(Y_target, Y_pred, normalize='all'),
-            index=[f'Actual: {i}' for i in [False, True]],
-            columns=[f'Predicted: {i}' for i in [False, True]]))
-
-def subcategory_evaluation(X, Y_target, proba, categorical_features):
-    '''
-    Compare the model performance for different subcategories to identify
-    classes of input the model performs poorly on.
-    '''
-    for feature in categorical_features:
-        print(f'\n\nEvaluation for {feature} values:')
-        # TODO: sort values by score
-        for value in np.sort(X_train[feature].unique()):
-            print('\nValue:', value)
-            indicies = X[feature] == value
-            X_subset = X[indicies]
-            Y_target_subset = Y_target[indicies]
-            proba_subset = proba[indicies]
-            print_evaluation(X[indicies], Y_target[indicies], proba[indicies])
-    # TODO: for numerical features look at correlation between feature value
-    # and output score
-    # TODO: filter to only show poorly performing subcategories
+def log_feature_importance(feature_importance, enable_mlflow=True,
+        enable_stdout=True):
+    if enable_mlflow:
+        mlflow.log_table(
+            feature_importance.reset_index().rename(columns={'index':'feature'}),
+            artifact_file='feature_importance.json')
+    if enable_stdout:
+        print('Feature importance:\n', feature_importance)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -137,9 +247,17 @@ if __name__ == '__main__':
     parser.add_argument('--train_size', type=int,
         help='Amount of the data to train on during model exploration.' +
             'Use this to speed up the exploration of different models.')
+
     parser.add_argument('--output',
         help='Path to the directory to save models and evaluation results',
         default='output/playground-series-s4e1/')
+
+    parser.add_argument('--mlflow_tracking_uri',
+        help='Address of the experiment tracking server.',
+        default='http://127.0.0.1:9999')
+    parser.add_argument('--mlflow_experiment_name',
+        default='Playground series s4e1')
+
     parser.add_argument('--target',
         help='Name of the target column',
         default='Exited')
@@ -155,7 +273,7 @@ if __name__ == '__main__':
         default=['Geography', 'Gender', 'HasCrCard', 'IsActiveMember'])
     parser.add_argument('--datatype_overrides', nargs='*',
         help='Override the inferred datatypes for the columns',
-        default=['HasCrCard=int64', 'IsActiveMember=int64'])
+        default=['HasCrCard=int8', 'IsActiveMember=int8'])
     parser.add_argument('--model_families', nargs='+',
         help='List of model families to try as a first pass',
         default=[
@@ -175,6 +293,9 @@ if __name__ == '__main__':
 
     seed = 2024
     scoring = 'roc_auc'
+
+    mlflow.set_tracking_uri(uri=args.mlflow_tracking_uri)
+    mlflow.set_experiment(args.mlflow_experiment_name)
 
     # Feature engineering
     feature_engineer = FunctionTransformer(FeatureEngineer(
@@ -210,92 +331,43 @@ if __name__ == '__main__':
     X_train_all_features = feature_engineer.fit_transform(X_train)
     X_val_all_features = feature_engineer.fit_transform(X_val)
 
+    # TODO: feature selection
+
     # Model family selection
-    model_families = {
-        'LogisticRegression': LogisticRegression(random_state=seed),
-        'MLPClassifier': MLPClassifier(random_state=seed),
-        'AdaBoostClassifier': AdaBoostClassifier(random_state=seed),
-        'RandomForestClassifier': RandomForestClassifier(random_state=seed),
-        'GradientBoostingClassifier': GradientBoostingClassifier(
-            random_state=seed),
-        'SVC': SVC(random_state=seed, probability=True),
-        'CatBoostClassifier': CatBoostClassifier(
-            cat_features=list_categorical_features(),
-            random_seed=seed, logging_level="Silent"),
-    }
-    tree_models = {
-        'AdaBoostClassifier',
-        'RandomForestClassifier',
-        'GradientBoostingClassifier',
-        'CatBoostClassifier'
-    }
     for model_family in args.model_families:
-        # TODO: save construction hyperparameters
-        model = model_families[model_family]
-        steps = []
+        with mlflow.start_run():
+            params = {
+                'model_family':model_family,
+                'seed':seed,
+                'categorical_features': list_categorical_features(),
+                'numerical_features': list_numerical_features(),
+            }
+            log_params(params)
+            model_pipeline = create_model_pipeline(params)
 
-        # Decision tree models perform better without one-hot encoding and are
-        # invariant to scaling of numerical features.
-        if model_family == 'CatBoostClassifier':
-            # https://catboost.ai/en/docs/concepts/faq#why-float-and-nan-values-are-forbidden-for-cat-features
-            # Categorical features must have integer or string datatypes. Use
-            # the --datatype_overrides flag to cast the column datatypes as
-            # needed.
-            pass
-        elif model_family in tree_models:
-            steps.append(('Column transform',
-                ColumnTransformer([
-                ('Categorical', OrdinalEncoder(), list_categorical_features()),
-                ('Numerical', 'passthrough', list_numerical_features())
-            ])))
-        else:
-            steps.append(('Column transform',
-                ColumnTransformer([
-                ('Categorical', OneHotEncoder(drop='if_binary'),
-                    list_categorical_features()),
-                ('Numerical', StandardScaler(), list_numerical_features())
-            ])))
-        steps.append(('Model', model))
-        model_pipeline = Pipeline(steps)
+            X_train_features = X_train_all_features
+            X_val_features = X_val_all_features
+            log_data(X_train_all_features, Y_train, 'training')
+            log_data(X_val_all_features, Y_val, 'validation')
 
-        print('\n\nEvaluating model family:', model_family)
-        # TODO: feature selection
-        X_train_features = X_train_all_features
-        X_val_features = X_val_all_features
+            model_pipeline.fit(X_train_features, Y_train)
+            log_model(model_pipeline)
 
-        # TODO: save training hyper-parameters
-        model_pipeline.fit(X_train_features, Y_train)
-        save_model(args.output, model_family, model_pipeline)
+            proba_train = model_pipeline.predict_proba(X_train_features)[:, 1]
+            log_performance(evaluate_performance(Y_train, proba_train),
+                metric_suffix='train')
+            proba_val = model_pipeline.predict_proba(X_val_features)[:, 1]
+            log_performance(evaluate_performance(Y_val, proba_val),
+                metric_suffix='val')
 
-        proba_train = model_pipeline.predict_proba(X_train_features)[:, 1]
-        proba_val = model_pipeline.predict_proba(X_val_features)[:, 1]
-        save_predictions(args.output, model_family + '_train_predictions',
-            X=X_train_features[args.numerical_features + args.categorical_features],
-            proba=proba_train, proba_column_name='proba',
-            Y_target=Y_train)
-        save_predictions(args.output, model_family + '_val_predictions',
-            X=X_val_features[args.numerical_features + args.categorical_features],
-            proba=proba_val, proba_column_name='proba',
-            Y_target=Y_val)
+            if args.subcategory_evaluation:
+                log_subcategory_performance(
+                    evaluate_subcategory_performance(
+                        X_val_features, Y_val, proba_val,
+                        list_categorical_features()))
 
-        print('Training scores:')
-        print('-'*80)
-        print_evaluation(X_train_features, Y_train, proba_train)
-        if args.subcategory_evaluation:
-            subcategory_evaluation(X_val_features, Y_val, proba_val,
-                list_categorical_features())
-
-        print('\nValidation scores:')
-        print('-'*80)
-        print_evaluation(X_val_features, Y_val, proba_val)
-        if args.subcategory_evaluation:
-            subcategory_evaluation(X_val_features, Y_val, proba_val,
-                list_categorical_features())
-
-        if args.feature_importance:
-            print('\nMost important features (permutation importance):')
-            print(most_important_features(model_pipeline, X_val_features, Y_val,
-                scoring=scoring))
-        # TODO: save evaluation metrics
+            if args.feature_importance:
+                log_feature_importance(evaluate_feature_importance(
+                    model_pipeline, X_val_features, Y_val, scoring=scoring))
 
     # Select the best and run hyper parameter searches
