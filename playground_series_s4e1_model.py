@@ -106,8 +106,8 @@ def create_model_pipeline(params):
         steps.append(('Column transform',
             ColumnTransformer([
             ('Categorical', OneHotEncoder(drop='if_binary'),
-                list_categorical_features()),
-            ('Numerical', StandardScaler(), list_numerical_features())
+                all_categorical_features),
+            ('Numerical', StandardScaler(), all_numerical_features)
         ])))
 
     # Model
@@ -160,10 +160,17 @@ def log_data(X, Y, label, enable_mlflow=True):
         mlflow.data.from_pandas(pd.concat([X, Y], axis=1)),
         context=label)
 
+class MlFlowModelWrapper:
+    def __init__(self, model):
+        self.model = model
+
+    def predict(self, X):
+        return self.model.predict_proba(X)[:,1]
+
 def log_model(model, enable_mlflow=True):
     if not enable_mlflow:
         return
-    mlflow.sklearn.log_model(model, 'model')
+    mlflow.sklearn.log_model(MlFlowModelWrapper(model), 'model')
     #mlflow.catboost.log_model(model, 'model')
 
 def evaluate_performance(Y_target, proba):
@@ -195,7 +202,7 @@ def evaluate_subcategory_performance(X, Y_target, proba, categorical_features):
     metrics = []
     for feature in categorical_features:
         metrics_by_value = []
-        for value in np.sort(X_train[feature].unique()):
+        for value in np.sort(X[feature].unique()):
             indicies = X[feature] == value
             Y_target_subset = Y_target[indicies]
             proba_subset = proba[indicies]
@@ -222,7 +229,7 @@ def log_subcategory_performance(metrics,
     if enable_stdout:
         # TODO: filter to only show poorly performing subcategories
         print('Subcategory performance:', pp(metrics))
-    
+
 def evaluate_feature_importance(model, X_val, Y_val, **kwargs):
     r = permutation_importance(model, X_val, Y_val, **kwargs)
     return pd.DataFrame({
@@ -239,6 +246,84 @@ def log_feature_importance(feature_importance, enable_mlflow=True,
     if enable_stdout:
         print('Feature importance:\n', feature_importance)
 
+def do_training_runs(args, feature_engineer, all_numerical_features,
+            all_categorical_features):
+    seed = 2024
+    scoring = 'roc_auc'
+
+    train_dataset = load_dataset(args.train_data,
+        parse_datatype_overrides(args.datatype_overrides))
+
+    Y = train_dataset[args.target]
+    X = train_dataset[args.numerical_features + args.categorical_features]
+
+    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2,
+                                        random_state=seed)
+
+    if args.train_size is not None and args.train_size < len(X_train):
+        X_train = X_train[:args.train_size]
+        Y_train = Y_train[:args.train_size]
+
+    # Cache the preprocessed training data
+    X_train_all_features = feature_engineer.fit_transform(X_train)
+    X_val_all_features = feature_engineer.fit_transform(X_val)
+
+    # TODO: feature selection
+
+    # Model family selection
+    for model_family in args.model_families:
+        with mlflow.start_run():
+            params = {
+                'model_family':model_family,
+                'seed':seed,
+                'categorical_features': all_categorical_features,
+                'numerical_features': all_numerical_features,
+                'train_size':args.train_size,
+            }
+            log_params(params)
+            model_pipeline = create_model_pipeline(params)
+
+            X_train_features = X_train_all_features
+            X_val_features = X_val_all_features
+            log_data(X_train_all_features, Y_train, 'training')
+            log_data(X_val_all_features, Y_val, 'validation')
+
+            model_pipeline.fit(X_train_features, Y_train)
+            log_model(model_pipeline)
+
+            proba_train = model_pipeline.predict_proba(X_train_features)[:, 1]
+            log_performance(evaluate_performance(Y_train, proba_train),
+                metric_suffix='train')
+            proba_val = model_pipeline.predict_proba(X_val_features)[:, 1]
+            log_performance(evaluate_performance(Y_val, proba_val),
+                metric_suffix='val')
+
+            if args.subcategory_evaluation:
+                log_subcategory_performance(
+                    evaluate_subcategory_performance(
+                        X_val_features, Y_val, proba_val,
+                        all_categorical_features))
+
+            if args.feature_importance:
+                log_feature_importance(evaluate_feature_importance(
+                    model_pipeline, X_val_features, Y_val, scoring=scoring))
+
+    # Select the best and run hyper parameter searches
+
+def do_inference(args, feature_engineer, all_numerical_features,
+            all_categorical_features):
+    dataset = load_dataset(args.inference_input,
+        parse_datatype_overrides(args.datatype_overrides))
+    X = feature_engineer.fit_transform(
+        dataset[args.numerical_features + args.categorical_features])
+    model = mlflow.pyfunc.load_model(args.inference_model)
+    proba = model.predict(X)
+    submission = pd.DataFrame({
+        'id':dataset['id'],
+        'Exited':proba
+    })
+    submission.to_csv(args.inference_output, index=False)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_data',
@@ -248,9 +333,12 @@ if __name__ == '__main__':
         help='Amount of the data to train on during model exploration.' +
             'Use this to speed up the exploration of different models.')
 
-    parser.add_argument('--output',
-        help='Path to the directory to save models and evaluation results',
-        default='output/playground-series-s4e1/')
+    parser.add_argument('--inference_model',
+        help='Run id of the model to use for inference')
+    parser.add_argument('--inference_input',
+        help='Path to a CSV file containing the input to run inference on')
+    parser.add_argument('--inference_output',
+        help='Path to a CSV output with the final predictions')
 
     parser.add_argument('--mlflow_tracking_uri',
         help='Address of the experiment tracking server.',
@@ -261,6 +349,7 @@ if __name__ == '__main__':
     parser.add_argument('--target',
         help='Name of the target column',
         default='Exited')
+    # TODO: remove parameter
     parser.add_argument('--dropped_features', nargs='+',
         help='List of columns for features to drop before training',
         default=['id', 'CustomerId', 'Surname'])
@@ -291,12 +380,11 @@ if __name__ == '__main__':
         help='Evaluate feature importance using permutation importance')
     args = parser.parse_args()
 
-    seed = 2024
-    scoring = 'roc_auc'
 
     mlflow.set_tracking_uri(uri=args.mlflow_tracking_uri)
     mlflow.set_experiment(args.mlflow_experiment_name)
 
+    # TODO: refactor to make transforms hyperparameters
     # Feature engineering
     feature_engineer = FunctionTransformer(FeatureEngineer(
         numerical_features=args.numerical_features,
@@ -304,70 +392,18 @@ if __name__ == '__main__':
         square=True,
         cube=True,
         categorical_features=args.categorical_features,
-        pairs=True))
+        # Model evaluation fails when there is a new combination of categorical
+        # feature values at test time.
+        pairs=False))
 
-    def list_numerical_features():
-        return args.numerical_features +\
+    all_numerical_features = args.numerical_features + \
             feature_engineer.func.engineered_numerical_features
-
-    def list_categorical_features():
-        return args.categorical_features + \
+    all_categorical_features = args.categorical_features + \
             feature_engineer.func.engineered_categorical_features
 
-    train_dataset = load_dataset(args.train_data,
-        parse_datatype_overrides(args.datatype_overrides))
-
-    Y = train_dataset[args.target]
-    X = train_dataset.drop(columns=[args.target] + args.dropped_features)
-
-    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2,
-                                        random_state=seed)
-
-    if args.train_size is not None and args.train_size < len(X_train):
-        X_train = X_train[:args.train_size]
-        Y_train = Y_train[:args.train_size]
-
-    # Cache the preprocessed training data
-    X_train_all_features = feature_engineer.fit_transform(X_train)
-    X_val_all_features = feature_engineer.fit_transform(X_val)
-
-    # TODO: feature selection
-
-    # Model family selection
-    for model_family in args.model_families:
-        with mlflow.start_run():
-            params = {
-                'model_family':model_family,
-                'seed':seed,
-                'categorical_features': list_categorical_features(),
-                'numerical_features': list_numerical_features(),
-            }
-            log_params(params)
-            model_pipeline = create_model_pipeline(params)
-
-            X_train_features = X_train_all_features
-            X_val_features = X_val_all_features
-            log_data(X_train_all_features, Y_train, 'training')
-            log_data(X_val_all_features, Y_val, 'validation')
-
-            model_pipeline.fit(X_train_features, Y_train)
-            log_model(model_pipeline)
-
-            proba_train = model_pipeline.predict_proba(X_train_features)[:, 1]
-            log_performance(evaluate_performance(Y_train, proba_train),
-                metric_suffix='train')
-            proba_val = model_pipeline.predict_proba(X_val_features)[:, 1]
-            log_performance(evaluate_performance(Y_val, proba_val),
-                metric_suffix='val')
-
-            if args.subcategory_evaluation:
-                log_subcategory_performance(
-                    evaluate_subcategory_performance(
-                        X_val_features, Y_val, proba_val,
-                        list_categorical_features()))
-
-            if args.feature_importance:
-                log_feature_importance(evaluate_feature_importance(
-                    model_pipeline, X_val_features, Y_val, scoring=scoring))
-
-    # Select the best and run hyper parameter searches
+    if args.inference_model is not None:
+        do_inference(args, feature_engineer, all_numerical_features,
+            all_categorical_features)
+    else:
+        do_training_runs(args, feature_engineer, all_numerical_features,
+            all_categorical_features)
