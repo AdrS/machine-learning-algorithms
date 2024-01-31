@@ -3,6 +3,7 @@ import itertools
 import json
 import mlflow
 import numpy as np
+import optuna
 import pandas as pd
 from catboost import CatBoostClassifier
 from sklearn.compose import ColumnTransformer
@@ -37,7 +38,9 @@ def list_pairs(elements):
 
 class FeatureEngineer:
     def __init__(self, numerical_features=[], log=True, square=True, cube=True,
-            categorical_features=[], pairs=True):
+            categorical_features=[], pairs=True,
+            bin_age=True,
+            bin_credit_score=True):
         self.numerical_features = numerical_features
         self.log = log
         self.square = square
@@ -57,6 +60,12 @@ class FeatureEngineer:
         if pairs:
             for (f1, f2) in list_pairs(categorical_features):
                 self.engineered_categorical_features.append(f'({f1}, {f2})')
+        self.bin_age = bin_age
+        self.bin_credit_score = bin_credit_score
+        if self.bin_age:
+            self.engineered_categorical_features.append('Age_bins')
+        if self.bin_credit_score:
+            self.engineered_categorical_features.append('CreditScore_bins')
 
     def __call__(self, X):
         for feature in self.numerical_features:
@@ -71,6 +80,17 @@ class FeatureEngineer:
         if self.pairs:
             for (f1, f2) in list_pairs(self.categorical_features):
                 X[f'({f1}, {f2})'] = [hash(t) for t in zip(X[f1], X[f2])]
+        # Bins
+        if self.bin_age:
+            X['Age_bins'] = pd.cut(X['Age'],
+                bins=[17, 30, 40, 50, 60, 100],
+                labels=['17-30', '30-40', '40-50', '50-60', '60-100'])
+        if self.bin_credit_score:
+            X['CreditScore_bins'] = pd.cut(X['CreditScore'],
+                bins=[0, 300, 600, 700, 850],
+                labels=['0-300', '300-600', '600-700', '700-850'])
+        #import pdb
+        #pdb.set_trace()
         return X
 
 def create_model_pipeline(params):
@@ -86,13 +106,14 @@ def create_model_pipeline(params):
     # Feature engineering
     feature_engineer = FunctionTransformer(FeatureEngineer(
         numerical_features=args.numerical_features,
-        log=True,
-        square=True,
-        cube=True,
+        log=params['log_features'],
+        square=params['square_features'],
+        cube=params['cube_features'],
         categorical_features=args.categorical_features,
-        # Model evaluation fails when there is a new combination of categorical
-        # feature values at test time.
-        pairs=False))
+        pairs=params['pairs_features'],
+        bin_age=params['bin_age'],
+        bin_credit_score=params['bin_credit_score'],
+        ))
     steps.append(('Feature engineering', feature_engineer))
 
     numerical_features = args.numerical_features + \
@@ -134,7 +155,7 @@ def create_model_pipeline(params):
     if model_family == 'LogisticRegression':
         model = LogisticRegression(random_state=seed)
     elif model_family == 'MLPClassifier':
-        model = MLPClassifier(random_state=seed)
+        model = MLPClassifier(random_state=seed, **params['model_args'])
     elif model_family == 'AdaBoostClassifier':
         model = AdaBoostClassifier(random_state=seed)
     elif model_family == 'RandomForestClassifier':
@@ -146,7 +167,8 @@ def create_model_pipeline(params):
     elif model_family == 'CatBoostClassifier':
         model = CatBoostClassifier(
             cat_features=categorical_features,
-            random_seed=seed, logging_level="Silent")
+            random_seed=seed, logging_level="Silent",
+            **params['model_args'])
     steps.append(('Model', model))
 
     return Pipeline(steps)
@@ -207,11 +229,11 @@ def log_performance(metrics,
     roc_auc = metrics['roc_auc']
     if enable_mlflow:
         mlflow.log_metric(f'{metric_suffix}_roc_auc', roc_auc)
-        mlflow.log_text(json.dumps(metrics['cm'], cls=NumpyEncoder),
-            artifact_file=f'{metric_suffix}_confusion_matrix.json')
+        #mlflow.log_text(json.dumps(metrics['cm'], cls=NumpyEncoder),
+        #    artifact_file=f'{metric_suffix}_confusion_matrix.json')
     if enable_stdout:
         print(metric_suffix, 'roc auc:', roc_auc)
-        print('Confusion matrix:', metrics['cm'])
+        #print('Confusion matrix:', metrics['cm'])
 
 def evaluate_subcategory_performance(X, Y_target, proba, categorical_features):
     '''
@@ -265,6 +287,84 @@ def log_feature_importance(feature_importance, enable_mlflow=True,
     if enable_stdout:
         print('Feature importance:\n', feature_importance)
 
+def do_hyperparameter_seach(args):
+    seed = 2024
+    scoring = 'roc_auc'
+
+    train_dataset = load_dataset(args.train_data,
+        parse_datatype_overrides(args.datatype_overrides))
+
+    Y = train_dataset[args.target]
+    X = train_dataset[args.numerical_features + args.categorical_features]
+
+    X_train, X_val, Y_train, Y_val = train_test_split(X, Y,
+        test_size=args.val_fraction, random_state=seed)
+
+    if args.train_size is not None and args.train_size < len(X_train):
+        X_train = X_train[:args.train_size]
+        Y_train = Y_train[:args.train_size]
+
+    def objective(trial):
+        model_family = trial.suggest_categorical('model_family', [
+            'MLPClassifier', 'CatBoostClassifier'
+        ])
+        if model_family == 'MLPClassifier':
+            num_layers = trial.suggest_int('num_layers', 1, 3)
+            model_args = {
+                'hidden_layer_sizes': [
+                    trial.suggest_int(f'h{i}_size', 50, 250) \
+                    for i in range(1, num_layers + 1)
+                ],
+                #'learning_rate':trial.suggest_categorical(),
+                'early_stopping':trial.suggest_categorical('early_stopping', [True, False]),
+            }
+        elif model_family == 'CatBoostClassifier':
+            model_args = {
+                'iterations': 500,
+                'learning_rate': trial.suggest_float('cb_learning_rate', 0.001, 0.1, log=True),
+                'depth': trial.suggest_int('depth', 4, 10),
+                #'subsample': trial.suggest_float('subsample', 0.05, 1.0),
+                'min_data_in_leaf': trial.suggest_int('min_data_in_leaf', 1, 100),
+            }
+        else:
+            raise ValueError(f'Unknown model family {model_family}')
+        params = {
+            'model_family':model_family,
+            'model_args': model_args,
+            'seed':seed,
+            'categorical_features': args.categorical_features,
+            'numerical_features': args.numerical_features,
+            'train_size':args.train_size,
+            # Feature engineering
+            ###############################################################
+            # These features not not useful for tree based models
+            'log_features':False,
+            'square_features':False,
+            'cube_features':False,
+            # Model evaluation fails when there is a new combination of
+            # categorical feature values at test time.
+            'pairs_features':False,
+            # Bin features
+            'bin_age': True,
+            'bin_credit_score': True,
+            #'bin_tenure': True,
+            #'bin_balance': True,
+            #'bin_estimated_salary': True,
+        }
+        model_pipeline = create_model_pipeline(params)
+        model_pipeline.fit(X_train, Y_train)
+        # TODO: early pruning
+        proba_val = model_pipeline.predict_proba(X_val)[:, 1]
+        score = roc_auc_score(Y_val, proba_val)
+        with mlflow.start_run():
+            log_params(params)
+            log_model(model_pipeline)
+            log_performance({'roc_auc':score}, metric_suffix='val')
+        return score
+
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=args.num_trials)
+
 def do_training_runs(args):
     seed = 2024
     scoring = 'roc_auc'
@@ -298,6 +398,21 @@ def do_training_runs(args):
                 'numerical_features': args.numerical_features,
                 'train_size':args.train_size,
                 'val_fraction':args.val_fraction,
+                # Feature engineering
+                ###############################################################
+                # These features not not useful for tree based models
+                'log_features':False,
+                'square_features':False,
+                'cube_features':False,
+                # Model evaluation fails when there is a new combination of
+                # categorical feature values at test time.
+                'pairs_features':False,
+                # Bin features
+                'bin_age': True,
+                'bin_credit_score': True,
+                #'bin_tenure': True,
+                #'bin_balance': True,
+                #'bin_estimated_salary': True,
             }
             log_params(params)
             model_pipeline = create_model_pipeline(params)
@@ -361,6 +476,9 @@ if __name__ == '__main__':
             'Set to 0 to use all data for training and none for validation.',
             default=0.2)
 
+    parser.add_argument('--num_trials', type=int,
+        help='How many trials to evaluate during hyperparamter search.')
+
     parser.add_argument('--inference_model',
         help='Run id of the model to use for inference')
     parser.add_argument('--inference_input',
@@ -408,6 +526,8 @@ if __name__ == '__main__':
     mlflow.set_tracking_uri(uri=args.mlflow_tracking_uri)
     mlflow.set_experiment(args.mlflow_experiment_name)
 
+    if args.num_trials is not None:
+        do_hyperparameter_seach(args)
     if args.inference_model is not None:
         do_inference(args)
     else:
