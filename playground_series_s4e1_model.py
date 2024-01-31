@@ -78,6 +78,8 @@ class FeatureEngineer:
             if self.cube:
                 X[f'{feature}^3'] = X[feature]**3
         if self.pairs:
+            # TODO: Return warning/error if the training set does not have all
+            # possible pairs
             for (f1, f2) in list_pairs(self.categorical_features):
                 X[f'({f1}, {f2})'] = [hash(t) for t in zip(X[f1], X[f2])]
         # Bins
@@ -474,6 +476,73 @@ def do_inference(args):
     })
     submission.to_csv(args.inference_output, index=False)
 
+def retrain_best(args):
+    seed = 2024
+    scoring = 'roc_auc'
+
+    train_dataset = load_dataset(args.train_data,
+        parse_datatype_overrides(args.datatype_overrides))
+    categorical_features = ['Geography', 'Gender', 'HasCrCard', 'IsActiveMember']
+    numerical_features = ['CreditScore', 'Age', 'Tenure', 'Balance', 'NumOfProducts', 'EstimatedSalary']
+    Y = train_dataset[args.target]
+    X = train_dataset[numerical_features + categorical_features]
+
+    X_train, Y_train = shuffle(X, Y, random_state=seed)
+
+    params = {
+        'model_family': 'CatBoostClassifier',
+        'model_args': {
+            'iterations': 500,
+            'learning_rate': 0.09223409571453274,
+            'depth': 5,
+            'min_data_in_leaf': 12,
+            'l2_leaf_reg': 2.7638731426901177
+        },
+        'seed':seed,
+        'categorical_features': categorical_features,
+        'numerical_features':  numerical_features,
+        # Feature engineering
+        ###############################################################
+        # These features not not useful for tree based models
+        'log_features': False,
+        'square_features':False,
+        'cube_features':False,
+        # Model evaluation fails when there is a new combination of
+        # categorical feature values at test time.
+        'pairs_features': True,
+        # Bin features
+        'bin_age': False,
+        'bin_credit_score': False,
+        #'bin_tenure': True,
+        #'bin_balance': True,
+        #'bin_estimated_salary': True,
+    }
+    with mlflow.start_run():
+        print('Creating pipeline...')
+        model_pipeline = create_model_pipeline(params)
+        log_params(params)
+        print('Training...')
+        model_pipeline.fit(X_train, Y_train)
+        log_model(model_pipeline)
+        print('Evaluating...')
+        proba_train = model_pipeline.predict_proba(X_train)[:, 1]
+        train_score = roc_auc_score(Y_train, proba_train)
+        log_performance({'roc_auc':train_score}, metric_suffix='train')
+        #proba_val = model_pipeline.predict_proba(X_val)[:, 1]
+        #score = roc_auc_score(Y_val, proba_val)
+        #print('Reporting metrics...', score)
+        #log_performance({'roc_auc':score}, metric_suffix='val')
+
+        test = load_dataset('data/playground-series-s4e1/test.csv',
+            parse_datatype_overrides(args.datatype_overrides))
+        X_test = test[numerical_features + categorical_features]
+        proba_test = model_pipeline.predict_proba(X_test)[:, 1]
+        submission = pd.DataFrame({
+            'id':test['id'],
+            'Exited':proba_test
+        })
+        submission.to_csv('/tmp/submission.csv', index=False)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_data',
@@ -537,9 +606,10 @@ if __name__ == '__main__':
     mlflow.set_tracking_uri(uri=args.mlflow_tracking_uri)
     mlflow.set_experiment(args.mlflow_experiment_name)
 
-    if args.num_trials is not None:
-        do_hyperparameter_seach(args)
-    elif args.inference_model is not None:
-        do_inference(args)
-    else:
-        do_training_runs(args)
+    retrain_best(args)
+    #if args.num_trials is not None:
+    #    do_hyperparameter_seach(args)
+    #elif args.inference_model is not None:
+    #    do_inference(args)
+    #else:
+    #    do_training_runs(args)
