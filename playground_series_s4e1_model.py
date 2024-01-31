@@ -62,9 +62,9 @@ class FeatureEngineer:
                 self.engineered_categorical_features.append(f'({f1}, {f2})')
         self.bin_age = bin_age
         self.bin_credit_score = bin_credit_score
-        if self.bin_age:
+        if bin_age:
             self.engineered_categorical_features.append('Age_bins')
-        if self.bin_credit_score:
+        if bin_credit_score:
             self.engineered_categorical_features.append('CreditScore_bins')
 
     def __call__(self, X):
@@ -120,6 +120,7 @@ def create_model_pipeline(params):
             feature_engineer.func.engineered_numerical_features
     categorical_features = args.categorical_features + \
             feature_engineer.func.engineered_categorical_features
+    print(categorical_features)
 
     # Feature transformations
     tree_models = {
@@ -306,25 +307,27 @@ def do_hyperparameter_seach(args):
 
     def objective(trial):
         model_family = trial.suggest_categorical('model_family', [
-            'MLPClassifier', 'CatBoostClassifier'
+            'CatBoostClassifier',
+            #'MLPClassifier'
         ])
         if model_family == 'MLPClassifier':
-            num_layers = trial.suggest_int('num_layers', 1, 3)
+            num_layers = trial.suggest_int('num_layers', 1, 2)
             model_args = {
                 'hidden_layer_sizes': [
                     trial.suggest_int(f'h{i}_size', 50, 250) \
                     for i in range(1, num_layers + 1)
                 ],
                 #'learning_rate':trial.suggest_categorical(),
-                'early_stopping':trial.suggest_categorical('early_stopping', [True, False]),
+                'early_stopping':True, #trial.suggest_categorical('early_stopping', [True, False]),
             }
         elif model_family == 'CatBoostClassifier':
             model_args = {
                 'iterations': 500,
                 'learning_rate': trial.suggest_float('cb_learning_rate', 0.001, 0.1, log=True),
-                'depth': trial.suggest_int('depth', 4, 10),
+                'depth': trial.suggest_int('depth', 4, 9),
                 #'subsample': trial.suggest_float('subsample', 0.05, 1.0),
-                'min_data_in_leaf': trial.suggest_int('min_data_in_leaf', 1, 100),
+                'min_data_in_leaf': trial.suggest_int('min_data_in_leaf', 10, 90),
+                'l2_leaf_reg':trial.suggest_float('l2_leaf_reg', 2.5, 5),
             }
         else:
             raise ValueError(f'Unknown model family {model_family}')
@@ -338,27 +341,34 @@ def do_hyperparameter_seach(args):
             # Feature engineering
             ###############################################################
             # These features not not useful for tree based models
-            'log_features':False,
+            'log_features':trial.suggest_categorical('log_features', [False, True]),
             'square_features':False,
             'cube_features':False,
             # Model evaluation fails when there is a new combination of
             # categorical feature values at test time.
-            'pairs_features':False,
+            'pairs_features': trial.suggest_categorical('pairs_features', [False, True]),
             # Bin features
-            'bin_age': True,
-            'bin_credit_score': True,
+            'bin_age': False, #trial.suggest_categorical('bin_age', [False, True]),
+            'bin_credit_score': False #trial.suggest_categorical('bin_credit_score', [False, True]),
             #'bin_tenure': True,
             #'bin_balance': True,
             #'bin_estimated_salary': True,
         }
-        model_pipeline = create_model_pipeline(params)
-        model_pipeline.fit(X_train, Y_train)
-        # TODO: early pruning
-        proba_val = model_pipeline.predict_proba(X_val)[:, 1]
-        score = roc_auc_score(Y_val, proba_val)
         with mlflow.start_run():
+            print('Creating pipeline...')
+            model_pipeline = create_model_pipeline(params)
             log_params(params)
+            print('Training...')
+            model_pipeline.fit(X_train, Y_train)
             log_model(model_pipeline)
+            # TODO: early pruning
+            print('Evaluating...')
+            proba_train = model_pipeline.predict_proba(X_train)[:, 1]
+            train_score = roc_auc_score(Y_train, proba_train)
+            log_performance({'roc_auc':train_score}, metric_suffix='train')
+            proba_val = model_pipeline.predict_proba(X_val)[:, 1]
+            score = roc_auc_score(Y_val, proba_val)
+            print('Reporting metrics...', score)
             log_performance({'roc_auc':score}, metric_suffix='val')
         return score
 
@@ -413,6 +423,7 @@ def do_training_runs(args):
                 #'bin_tenure': True,
                 #'bin_balance': True,
                 #'bin_estimated_salary': True,
+                'model_args':{}
             }
             log_params(params)
             model_pipeline = create_model_pipeline(params)
@@ -528,7 +539,7 @@ if __name__ == '__main__':
 
     if args.num_trials is not None:
         do_hyperparameter_seach(args)
-    if args.inference_model is not None:
+    elif args.inference_model is not None:
         do_inference(args)
     else:
         do_training_runs(args)
